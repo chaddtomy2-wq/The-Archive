@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>The Archive</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body, #root { height: 100%; background: #0e0e0e; }
+body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; -webkit-font-smoothing: antialiased; }
+input, select, textarea, button { font-family: inherit; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+</style>
+<!-- Firebase (compat/UMD) -->
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+<!-- React (UMD) + Babel -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const APP_NAME = "the-archive";
+const APP_VERSION = "V1";
+const BUILD_DATE = "2026-02-17";
+const SCHEMA_VERSION = 2;
+
+const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } = React;
+
+/* ═══════════════════════════════════════════════════════
+   FIREBASE SETUP
+   ═══════════════════════════════════════════════════════ */
+const firebaseConfig = {
+  apiKey: "AIzaSyBff6bB073LF0juwOGBsBYpPrVIwPmewRI",
+  authDomain: "the-archive-b5f57.firebaseapp.com",
+  projectId: "the-archive-b5f57",
+  storageBucket: "the-archive-b5f57.firebasestorage.app",
+  messagingSenderId: "1090196196339",
+  appId: "1:1090196196339:web:6a143ea758464f70f36086"
+};
+const fbApp = firebase.initializeApp(firebaseConfig);
+const auth = fbApp.auth();
+const db = fbApp.firestore();
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+function signIn() {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(err => {
+    if (err.code === "auth/popup-blocked" || err.code === "auth/popup-closed-by-user") {
+      auth.signInWithRedirect(provider);
+    }
+  });
+}
+
+/* ═══════════════════════════════════════════════════════
+   AUTH GATE
+   ═══════════════════════════════════════════════════════ */
+const UserContext = createContext(null);
+function useUser() { return useContext(UserContext); }
+
+function AuthGate({ children }) {
+  const [user, setUser] = useState(undefined);
+  useEffect(() => { const unsub = auth.onAuthStateChanged(u => setUser(u || null)); return unsub; }, []);
+  if (user === undefined) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e0e",color:"#777",fontSize:14 }}>Loading...</div>;
+  if (!user) return (
+    <div style={{ display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e0e",gap:24 }}>
+      <div style={{ fontSize:16,fontWeight:800,letterSpacing:"0.14em",textTransform:"uppercase",color:"#C9A84C" }}>The Archive</div>
+      <button onClick={signIn} style={{ padding:"14px 32px",fontSize:14,fontWeight:600,borderRadius:6,border:"none",background:"#C9A84C",color:"#111",cursor:"pointer",fontFamily:"inherit" }}>Sign in with Google</button>
+      <div style={{ fontSize:11,color:"#444" }}>{"Build: "+APP_NAME+" "+APP_VERSION+" — "+BUILD_DATE}</div>
+    </div>
+  );
+  return <UserContext.Provider value={user}>{children}</UserContext.Provider>;
+}
+
+/* ═══════════════════════════════════════════════════════
+   FIRESTORE DATA LAYER
+   ═══════════════════════════════════════════════════════ */
+function useFirestoreItems() {
+  const user = useUser();
+  const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const col = useMemo(() => user ? db.collection("users").doc(user.uid).collection("items") : null, [user]);
+
+  useEffect(() => {
+    if (!col) return;
+    const unsub = col.onSnapshot(snap => {
+      const docs = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+      setItems(docs);
+      setLoaded(true);
+    });
+    return unsub;
+  }, [col]);
+
+  const save = useCallback(async (item) => {
+    if (!col) return;
+    const { id, ...data } = item;
+    data.ownerId = user.uid;
+    await col.doc(id).set(data, { merge: true });
+  }, [col, user]);
+
+  const saveBatch = useCallback(async (itemList) => {
+    if (!col) return;
+    const batch = db.batch();
+    itemList.forEach(item => {
+      const { id, ...data } = item;
+      data.ownerId = user.uid;
+      batch.set(col.doc(id), data, { merge: true });
+    });
+    await batch.commit();
+  }, [col, user]);
+
+  return { items, loaded, save, saveBatch };
+}
+
+function useFirestorePrefs() {
+  const user = useUser();
+  const [prefs, setPrefs] = useState(null);
+  const docRef = useMemo(() => user ? db.collection("users").doc(user.uid) : null, [user]);
+
+  useEffect(() => {
+    if (!docRef) return;
+    const unsub = docRef.onSnapshot(snap => {
+      const data = snap.data() || {};
+      setPrefs({
+        customTax: data.customTax || [],
+        allTags: data.allTags || [],
+        streak: data.streak || { current: 0, longest: 0, lastLearnedDate: null },
+        lastExport: data.lastExport || null,
+        initialized: data.initialized || false
+      });
+    });
+    return unsub;
+  }, [docRef]);
+
+  const update = useCallback(async (partial) => {
+    if (!docRef) return;
+    await docRef.set(partial, { merge: true });
+  }, [docRef]);
+
+  return { prefs, update };
+}
+
+/* ═══════════════════════════════════════════════════════
+   DESIGN TOKENS
+   ═══════════════════════════════════════════════════════ */
+const ACCENT = "#C9A84C";
+const ACCENT_DIM = "rgba(201,168,76,0.25)";
+const ACCENT_SUBTLE = "rgba(201,168,76,0.08)";
+const BG = "#0e0e0e";
+const BG_INPUT = "#181818";
+const TEXT = "#ddd";
+const TEXT_DIM = "#777";
+const TEXT_MUTED = "#444";
+const BORDER = "#1f1f1f";
+const SEPARATOR = "#1a1a1a";
+
+/* ═══════════════════════════════════════════════════════
+   CONSTANTS & DATA MODEL
+   ═══════════════════════════════════════════════════════ */
+const STATES = { WANT: "Want to Learn", LIBRARY: "Library", LEARNED: "Learned" };
+const TYPES = ["Article", "Tweet", "Video", "Chart"];
+
+/*  Unified default domains — every domain is a peer.
+    group: "Professional" | "Personal" (for sidebar grouping only)
+    categories: { name: [subcategories] }                          */
+const DEFAULT_DOMAINS = [
+  { name: "Markets", group: "Professional", categories: { "Macroeconomics":[],"Equities":[],"Commodities":[],"Energy":[],"Nuclear":[],"Critical Minerals & Materials":[],"Precious Metals":[],"Crypto":[],"Derivatives":[],"Trading & Market Psychology":[],"Seasonality & Cycles":[],"Market Structure":[] }},
+  { name: "Tech & Innovation", group: "Professional", categories: { "Artificial Intelligence":[],"Materials":[],"Infrastructure":[],"Robotics & Automation":[],"Defense & Aerospace":[],"Health Tech":[],"Energy Technology":[],"Frontier Technology":[] }},
+  { name: "Geopolitics", group: "Professional", categories: {} },
+  { name: "Politics & Policy", group: "Professional", categories: { "Canada":[],"United States":[] }},
+  { name: "Career & Craft", group: "Professional", categories: {} },
+  { name: "Health", group: "Personal", categories: {} },
+  { name: "Fitness", group: "Personal", categories: {} },
+  { name: "Psychology", group: "Personal", categories: {} },
+  { name: "Self-Improvement", group: "Personal", categories: {} },
+  { name: "Relationships", group: "Personal", categories: {} },
+  { name: "Philosophy", group: "Personal", categories: {} },
+  { name: "Lifestyle", group: "Personal", categories: {} },
+];
+
+const COUNTRY_DOMAINS = ["Geopolitics"];
+const COUNTRIES = ["Afghanistan","Albania","Algeria","Andorra","Angola","Argentina","Armenia","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Cambodia","Cameroon","Canada","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo","Costa Rica","Croatia","Cuba","Cyprus","Czech Republic","Denmark","Djibouti","Dominican Republic","DR Congo","East Timor","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia","Fiji","Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Guatemala","Guinea","Guyana","Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran","Iraq","Ireland","Israel","Italy","Ivory Coast","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Mauritania","Mauritius","Mexico","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar","Namibia","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway","Oman","Pakistan","Palestine","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar","Romania","Russia","Rwanda","Saudi Arabia","Senegal","Serbia","Sierra Leone","Singapore","Slovakia","Slovenia","Somalia","South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Togo","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Uganda","Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay","Uzbekistan","Vatican City","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe"];
+const genId = () => "arch_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+
+/* ═══════════════════════════════════════════════════════
+   TAXONOMY — unified dynamic system
+   Domains → Categories → Subcategories
+   All domains are peers, tagged Professional or Personal
+   ═══════════════════════════════════════════════════════ */
+const TaxonomyContext = createContext(null);
+function useTaxonomy() { return useContext(TaxonomyContext); }
+
+function loadCustomTaxonomy() {
+  try { return JSON.parse(localStorage.getItem("archive_taxonomy_v2") || "[]"); } catch { return []; }
+}
+function saveCustomTaxonomy(t) { localStorage.setItem("archive_taxonomy_v2", JSON.stringify(t)); }
+function loadTags() { try { return JSON.parse(localStorage.getItem("archive_tags") || "[]"); } catch { return []; } }
+function saveTags(tags) { localStorage.setItem("archive_tags", JSON.stringify(tags)); }
+
+function buildTaxonomy(customs) {
+  // Start with defaults — deep copy
+  const domains = DEFAULT_DOMAINS.map(d => ({
+    name: d.name, group: d.group,
+    categories: Object.fromEntries(Object.entries(d.categories).map(([k, v]) => [k, [...v]]))
+  }));
+  const domainMap = {};
+  domains.forEach(d => { domainMap[d.name] = d; });
+
+  // First pass: apply renames to defaults
+  customs.forEach(c => {
+    if (c.type === "rename_domain" && domainMap[c.from]) {
+      const d = domainMap[c.from];
+      delete domainMap[c.from];
+      d.name = c.to;
+      domainMap[c.to] = d;
+    } else if (c.type === "rename_category" && domainMap[c.domain]) {
+      const d = domainMap[c.domain];
+      if (d.categories.hasOwnProperty(c.from)) {
+        d.categories[c.to] = d.categories[c.from];
+        delete d.categories[c.from];
+      }
+    } else if (c.type === "rename_subcategory" && domainMap[c.domain]) {
+      const d = domainMap[c.domain];
+      if (d.categories[c.category]) {
+        const idx = d.categories[c.category].indexOf(c.from);
+        if (idx >= 0) d.categories[c.category][idx] = c.to;
+      }
+    }
+  });
+
+  // Second pass: add custom domains/categories/subcategories
+  customs.forEach(c => {
+    if (c.type === "domain") {
+      if (!domainMap[c.name]) {
+        const d = { name: c.name, group: c.group || "Professional", categories: {} };
+        domains.push(d);
+        domainMap[c.name] = d;
+      }
+    } else if (c.type === "category" && c.domain && domainMap[c.domain]) {
+      const d = domainMap[c.domain];
+      if (!d.categories[c.name]) d.categories[c.name] = [];
+    } else if (c.type === "subcategory" && c.domain && c.category && domainMap[c.domain]) {
+      const d = domainMap[c.domain];
+      if (!d.categories[c.category]) d.categories[c.category] = [];
+      if (!d.categories[c.category].includes(c.name)) d.categories[c.category].push(c.name);
+    }
+  });
+
+  const proDomains = domains.filter(d => d.group === "Professional");
+  const perDomains = domains.filter(d => d.group === "Personal");
+  const allDomainNames = domains.map(d => d.name);
+  return { domains, domainMap, proDomains, perDomains, allDomainNames };
+}
+
+/* ═══════════════════════════════════════════════════════
+   DATA PERSISTENCE — with migration from V1 schema
+   ═══════════════════════════════════════════════════════ */
+function migrateItems(rawItems, oldSynthesis) {
+  const now = new Date().toISOString();
+  return rawItems.map(i => {
+    const m = { ...i };
+    if (m.type === "Thread") m.type = "Tweet";
+    if (!m.ownerId) m.ownerId = "local";
+    if (!m.createdAt) m.createdAt = m.date_added || now;
+    if (!m.updatedAt) m.updatedAt = m.date_added || now;
+    if (!m.schemaVersion) m.schemaVersion = 1;
+    if (m.deleted === undefined) m.deleted = false;
+    if (m.deletedAt === undefined) m.deletedAt = null;
+    if (!m.synthesis && oldSynthesis && oldSynthesis[m.id]) {
+      m.synthesis = oldSynthesis[m.id].text || "";
+      m.synthesisUpdatedAt = oldSynthesis[m.id].updated || null;
+    }
+    if (m.synthesis === undefined) m.synthesis = "";
+    if (m.synthesisUpdatedAt === undefined) m.synthesisUpdatedAt = null;
+
+    // V1→V2 migration: Personal items had level_2:"Personal", level_3:"Health"
+    // Convert to level_2:"Health", level_3:null
+    if (m.level_2 === "Personal" && m.level_3) {
+      m.level_2 = m.level_3;
+      m.level_3 = null;
+      m.level_1 = "Personal";
+    }
+    // Ensure level_4 exists
+    if (m.level_4 === undefined) m.level_4 = null;
+    // Set group based on domain
+    const perNames = DEFAULT_DOMAINS.filter(d => d.group === "Personal").map(d => d.name);
+    if (perNames.includes(m.level_2)) m.level_1 = "Personal";
+    else if (m.level_1 !== "Personal") m.level_1 = "Professional";
+
+    m.schemaVersion = SCHEMA_VERSION;
+    return m;
+  });
+}
+
+function loadItems() {
+  try {
+    const raw = JSON.parse(localStorage.getItem("archive_items") || "[]");
+    const oldSynth = (() => { try { return JSON.parse(localStorage.getItem("archive_synthesis") || "{}"); } catch { return {}; } })();
+    const migrated = migrateItems(raw, oldSynth);
+    if (Object.keys(oldSynth).length > 0) localStorage.removeItem("archive_synthesis");
+    return migrated;
+  } catch { return []; }
+}
+const saveItems = (items) => localStorage.setItem("archive_items", JSON.stringify(items));
+
+/* Nav counts: per-domain counts for sidebar */
+function useNavCounts(items, mode) {
+  const tax = useTaxonomy();
+  return useMemo(() => {
+    const active = items.filter(i => !i.deleted);
+    const f = mode === "starred" ? active.filter(i => i.starred && i.state === STATES.LEARNED) : mode === "learned" ? active.filter(i => i.state === STATES.LEARNED) : active.filter(i => i.state !== STATES.LEARNED);
+    const c = {};
+    let pro = 0, per = 0;
+    tax.proDomains.forEach(d => { const n = f.filter(i => i.level_2 === d.name).length; c[d.name] = n; pro += n; });
+    tax.perDomains.forEach(d => { const n = f.filter(i => i.level_2 === d.name).length; c[d.name] = n; per += n; });
+    c._pro = pro; c._per = per;
+    return c;
+  }, [items, mode, tax]);
+}
+
+/* ═══════════════════════════════════════════════════════
+   EXPORT
+   ═══════════════════════════════════════════════════════ */
+function doExport(items) {
+  const active = items.filter(i => !i.deleted);
+  const payload = { appName: APP_NAME, schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), recordCount: active.length, data: active };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${APP_NAME}-export-${new Date().toISOString().split("T")[0]}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  localStorage.setItem("archive_lastExport", new Date().toISOString());
+  return new Date().toISOString();
+}
+
+function doImport(file, existingItems) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const parsed = JSON.parse(e.target.result);
+        if (!parsed.data || !Array.isArray(parsed.data)) return reject("Invalid export file: missing data array");
+        const existingIds = new Set(existingItems.map(i => i.id));
+        const newItems = parsed.data.filter(i => i.id && !existingIds.has(i.id));
+        const migrated = migrateItems(newItems, {});
+        resolve({ added: migrated.length, skipped: parsed.data.length - migrated.length, items: migrated });
+      } catch (err) { reject("Failed to parse file: " + err.message); }
+    };
+    reader.onerror = () => reject("Failed to read file");
+    reader.readAsText(file);
+  });
+}
+
+/* ═══════════════════════════════════════════════════════
+   STREAK
+   ═══════════════════════════════════════════════════════ */
+function getToday() { return new Date().toISOString().split("T")[0]; }
+function getYesterday() { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split("T")[0]; }
+function loadStreak() { try { const r = JSON.parse(localStorage.getItem("archive_streak") || "null"); if (!r) return { current: 0, longest: 0, lastLearnedDate: null }; return { current: r.current || 0, longest: r.longest || 0, lastLearnedDate: r.lastLearnedDate || null }; } catch { return { current: 0, longest: 0, lastLearnedDate: null }; } }
+function saveStreak(s) { localStorage.setItem("archive_streak", JSON.stringify(s)); }
+function resolveStreak(s) { const t = getToday(), y = getYesterday(); if (!s.lastLearnedDate) return s; if (s.lastLearnedDate === t || s.lastLearnedDate === y) return s; return { ...s, current: 0 }; }
+function recordLearned(s) { const t = getToday(), y = getYesterday(); if (s.lastLearnedDate === t) return s; if (s.lastLearnedDate === y) return { current: s.current + 1, lastLearnedDate: t, longest: Math.max(s.longest, s.current + 1) }; return { current: 1, lastLearnedDate: t, longest: Math.max(s.longest, 1) }; }
+
+/* ═══════════════════════════════════════════════════════
+   ICONS
+   ═══════════════════════════════════════════════════════ */
+const Svg = ({ children, size = 20, style }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, ...style }}>{children}</svg>;
+const HomeIcon = ({ size = 18, color = TEXT_DIM }) => <Svg size={size}><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke={color}/><path d="M9 22V12h6v10" stroke={color}/></Svg>;
+const TrophyIcon = ({ size = 18, color = TEXT_DIM }) => <Svg size={size}><path d="M6 9H4.5a2.5 2.5 0 010-5C5.1 4 6 4.5 6 4.5M18 9h1.5a2.5 2.5 0 000-5C18.9 4 18 4.5 18 4.5M4 22h16M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 19.24 7 20v2M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 19.24 17 20v2M12 2v5" stroke={color}/><path d="M8 7a4 4 0 108 0 4 4 0 00-8 0z" stroke={color}/></Svg>;
+const ChevR = ({ size = 16, color = TEXT_MUTED }) => <Svg size={size}><path d="M9 18l6-6-6-6" stroke={color}/></Svg>;
+const ChevL = ({ size = 16, color = TEXT_DIM }) => <Svg size={size}><path d="M15 18l-6-6 6-6" stroke={color}/></Svg>;
+const PlusI = ({ size = 16, color = "#111" }) => <Svg size={size}><path d="M12 5v14" stroke={color}/><path d="M5 12h14" stroke={color}/></Svg>;
+const CloseI = ({ size = 20, color = "#fff" }) => <Svg size={size}><path d="M18 6L6 18" stroke={color}/><path d="M6 6l12 12" stroke={color}/></Svg>;
+const EditI = ({ size = 14, color = ACCENT }) => <Svg size={size}><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke={color}/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke={color}/></Svg>;
+const StarI = ({ size = 16, color = TEXT_MUTED, fill = "none" }) => <Svg size={size}><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke={color} fill={fill}/></Svg>;
+const SearchIcon = ({ size = 18, color = TEXT_DIM }) => <Svg size={size}><circle cx="11" cy="11" r="8" stroke={color}/><path d="M21 21l-4.35-4.35" stroke={color}/></Svg>;
+const TrashIcon = ({ size = 14, color = "#c44" }) => <Svg size={size}><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" stroke={color}/></Svg>;
+const DownloadIcon = ({ size = 16, color = TEXT_DIM }) => <Svg size={size}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" stroke={color}/><path d="M7 10l5 5 5-5" stroke={color}/><path d="M12 15V3" stroke={color}/></Svg>;
+const SettingsIcon = ({ size = 18, color = TEXT_DIM }) => <Svg size={size}><circle cx="12" cy="12" r="3" stroke={color}/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke={color}/></Svg>;
+const FireIcon = ({ size = 16, color = "#e8590c" }) => <Svg size={size}><path d="M12 12c2-2.96 0-7-1-8 0 3.038-1.773 4.741-3 6-1.226 1.26-2 3.24-2 5a6 6 0 1012 0c0-1.532-1.056-3.94-2-5-1.786 3-2 2-4 2z" stroke={color} fill={color} strokeWidth={1.2}/></Svg>;
+const ClockIcon = ({ size = 18, color = TEXT_DIM }) => <Svg size={size}><circle cx="12" cy="12" r="10" stroke={color}/><path d="M12 6v6l4 2" stroke={color}/></Svg>;
+
+/* ═══════════════════════════════════════════════════════
+   IMAGE MODAL
+   ═══════════════════════════════════════════════════════ */
+function ImageModal({ src, onClose }) {
+  const [scale, setScale] = useState(1); const [pos, setPos] = useState({ x: 0, y: 0 }); const [drag, setDrag] = useState(false); const sp = useRef({ x: 0, y: 0 }); const ld = useRef(0);
+  useEffect(() => { const fn = e => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", fn); return () => window.removeEventListener("keydown", fn); }, [onClose]);
+  const gd = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const ts = e => { if (e.touches.length === 2) ld.current = gd(e.touches); else if (e.touches.length === 1 && scale > 1) { setDrag(true); sp.current = { x: e.touches[0].clientX - pos.x, y: e.touches[0].clientY - pos.y }; } };
+  const tm = e => { if (e.touches.length === 2) { const d = gd(e.touches); setScale(s => { const ns = Math.min(5, Math.max(1, s * (d / ld.current))); ld.current = d; if (ns <= 1) setPos({ x: 0, y: 0 }); return ns; }); } else if (e.touches.length === 1 && drag && scale > 1) setPos({ x: e.touches[0].clientX - sp.current.x, y: e.touches[0].clientY - sp.current.y }); };
+  const te = () => { setDrag(false); if (scale <= 1) setPos({ x: 0, y: 0 }); };
+  const wh = e => { e.preventDefault(); setScale(s => { const ns = Math.min(5, Math.max(1, s - e.deltaY * 0.002)); if (ns <= 1) setPos({ x: 0, y: 0 }); return ns; }); };
+  const md = e => { if (scale > 1) { setDrag(true); sp.current = { x: e.clientX - pos.x, y: e.clientY - pos.y }; } };
+  const mm = e => { if (drag && scale > 1) setPos({ x: e.clientX - sp.current.x, y: e.clientY - sp.current.y }); };
+  const dc = () => { if (scale > 1) { setScale(1); setPos({ x: 0, y: 0 }); } else setScale(2.5); };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.95)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", touchAction: "none" }} onTouchStart={ts} onTouchMove={tm} onTouchEnd={te} onWheel={wh} onMouseDown={md} onMouseMove={mm} onMouseUp={() => setDrag(false)}>
+      <button onClick={onClose} style={{ position: "absolute", top: 16, right: 16, background: "rgba(255,255,255,0.1)", border: "none", borderRadius: "50%", width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", zIndex: 1001 }}><CloseI /></button>
+      <img src={src} alt="" onDoubleClick={dc} draggable={false} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", transform: `translate(${pos.x}px,${pos.y}px) scale(${scale})`, transition: drag ? "none" : "transform 0.2s", cursor: scale > 1 ? "grab" : "default", userSelect: "none" }} />
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   SMALL COMPONENTS
+   ═══════════════════════════════════════════════════════ */
+const Badge = ({ state }) => <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 3, background: state === STATES.LEARNED ? ACCENT_SUBTLE : "rgba(255,255,255,0.04)", color: state === STATES.LEARNED ? ACCENT : TEXT_DIM }}>{state}</span>;
+function Star({ starred, enabled, onToggle }) { if (!enabled) return <StarI size={16} color={TEXT_MUTED} />; return <button onClick={e => { e.stopPropagation(); onToggle(); }} style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex" }}><StarI size={16} color={ACCENT} fill={starred ? ACCENT : "none"} /></button>; }
+function ConfirmModal({ message, confirmLabel, onConfirm, onCancel }) { return (<div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}><div style={{ background: "#1a1a1a", border: `1px solid ${BORDER}`, borderRadius: 10, padding: 24, maxWidth: 340, width: "100%" }}><div style={{ fontSize: 14, color: TEXT, lineHeight: 1.5, marginBottom: 20 }}>{message}</div><div style={{ display: "flex", gap: 10 }}><button onClick={onConfirm} style={{ flex: 1, padding: "11px 0", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: "#c44", color: "#fff", cursor: "pointer" }}>{confirmLabel || "Delete"}</button><button onClick={onCancel} style={{ flex: 1, padding: "11px 0", fontSize: 13, fontWeight: 500, fontFamily: "inherit", borderRadius: 5, border: `1px solid ${BORDER}`, background: "transparent", color: TEXT_DIM, cursor: "pointer" }}>Cancel</button></div></div></div>); }
+function ListRow({ title, meta, right, onClick, noBorder, compact }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: compact ? "11px 0" : "14px 0", borderBottom: noBorder ? "none" : `1px solid ${SEPARATOR}`, cursor: onClick ? "pointer" : "default", gap: 10 }}><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: compact ? 12.5 : 14, fontWeight: 500, color: TEXT, lineHeight: 1.4 }}>{title}</div>{meta && <div style={{ fontSize: compact ? 10.5 : 12, color: TEXT_MUTED, marginTop: 2, opacity: compact ? 0.7 : 1 }}>{meta}</div>}</div><div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>{right}{onClick && <ChevR size={compact ? 12 : 14} color={TEXT_MUTED} />}</div></div>); }
+function PageHeader({ title, subtitle, backLabel, onBack, onAdd, onEdit, compact }) { return (<div style={{ marginBottom: compact ? 4 : 8 }}>{onBack && <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: TEXT_DIM, fontSize: compact ? 11.5 : 13, fontFamily: "inherit", padding: compact ? "8px 0 2px 0" : "12px 0 4px 0" }}><ChevL size={compact ? 12 : 14} color={TEXT_DIM} /> {backLabel || "Back"}</button>}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: `${onBack ? (compact ? "6px" : "8px") : (compact ? "16px" : "24px")} 0 ${compact ? "10px" : "16px"}`, gap: 12 }}><div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}><div><h1 style={{ fontSize: compact ? 22 : 28, fontWeight: 700, letterSpacing: "-0.03em", color: TEXT, margin: 0, lineHeight: 1.1 }}>{title}</h1>{subtitle && <div style={{ fontSize: compact ? 11 : 13, color: TEXT_MUTED, marginTop: compact ? 4 : 6, opacity: compact ? 0.7 : 1 }}>{subtitle}</div>}</div>{onEdit && <button onClick={onEdit} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, marginTop: 2, flexShrink: 0 }}><EditI size={14} color={TEXT_MUTED} /></button>}</div>{onAdd && <button onClick={onAdd} style={{ display: "flex", alignItems: "center", gap: 4, padding: compact ? "6px 12px" : "8px 16px", borderRadius: 5, border: `1px solid ${ACCENT_DIM}`, background: "transparent", color: ACCENT, fontSize: compact ? 11 : 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, marginTop: 2 }}><PlusI size={compact ? 10 : 12} color={ACCENT} /> Add</button>}</div></div>); }
+const AddBtn = ({ label, onClick }) => <div onClick={onClick} style={{ padding: "10px 0", fontSize: 12, color: TEXT_MUTED, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}><PlusI size={11} color={TEXT_MUTED} /> {label}</div>;
+
+/* ═══════════════════════════════════════════════════════
+   ADD CATEGORY MODAL
+   ═══════════════════════════════════════════════════════ */
+function AddCategoryModal({ label, onAdd, onCancel }) {
+  const [name, setName] = useState("");
+  const inp = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "11px 13px", color: TEXT, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "#1a1a1a", border: `1px solid ${BORDER}`, borderRadius: 10, padding: 24, maxWidth: 340, width: "100%" }}>
+        <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 12 }}>{label}</div>
+        <input style={inp} value={name} onChange={e => setName(e.target.value)} placeholder="Name" autoFocus onKeyDown={e => { if (e.key === "Enter" && name.trim()) onAdd(name.trim()); }} />
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button onClick={() => { if (name.trim()) onAdd(name.trim()); }} style={{ flex: 1, padding: "11px 0", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: ACCENT, color: "#111", cursor: "pointer" }}>Add</button>
+          <button onClick={onCancel} style={{ flex: 1, padding: "11px 0", fontSize: 13, fontWeight: 500, fontFamily: "inherit", borderRadius: 5, border: `1px solid ${BORDER}`, background: "transparent", color: TEXT_DIM, cursor: "pointer" }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   RENAME MODAL
+   ═══════════════════════════════════════════════════════ */
+function RenameModal({ label, currentName, onRename, onCancel }) {
+  const [name, setName] = useState(currentName);
+  const inp = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "11px 13px", color: TEXT, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "#1a1a1a", border: `1px solid ${BORDER}`, borderRadius: 10, padding: 24, maxWidth: 340, width: "100%" }}>
+        <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 12 }}>{label}</div>
+        <input style={inp} value={name} onChange={e => setName(e.target.value)} autoFocus onKeyDown={e => { if (e.key === "Enter" && name.trim() && name.trim() !== currentName) onRename(name.trim()); }} />
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button onClick={() => { if (name.trim() && name.trim() !== currentName) onRename(name.trim()); }} style={{ flex: 1, padding: "11px 0", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: ACCENT, color: "#111", cursor: "pointer" }}>Rename</button>
+          <button onClick={onCancel} style={{ flex: 1, padding: "11px 0", fontSize: 13, fontWeight: 500, fontFamily: "inherit", borderRadius: 5, border: `1px solid ${BORDER}`, background: "transparent", color: TEXT_DIM, cursor: "pointer" }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   COUNTRY PICKER / FILTER / CHART UPLOAD
+   ═══════════════════════════════════════════════════════ */
+function CountryPicker({ selected, onChange }) {
+  const [search, setSearch] = useState(""); const [open, setOpen] = useState(false); const ref = useRef(null);
+  const filtered = search ? COUNTRIES.filter(c => c.toLowerCase().includes(search.toLowerCase())) : COUNTRIES;
+  const toggle = (c) => { if (selected.includes(c)) onChange(selected.filter(x => x !== c)); else if (selected.length < 10) onChange([...selected, c]); };
+  useEffect(() => { const fn = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }; document.addEventListener("mousedown", fn); return () => document.removeEventListener("mousedown", fn); }, []);
+  const chipStyle = { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, padding: "3px 8px", borderRadius: 3, background: ACCENT_SUBTLE, color: TEXT, cursor: "pointer" };
+  return (<div ref={ref} style={{ position: "relative" }}><div onClick={() => setOpen(!open)} style={{ width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "9px 13px", color: TEXT, fontSize: 13, boxSizing: "border-box", cursor: "pointer", minHeight: 40, display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>{selected.length === 0 && <span style={{ color: TEXT_MUTED, fontSize: 13 }}>Select countries…</span>}{selected.map(c => <span key={c} style={chipStyle} onClick={e => { e.stopPropagation(); toggle(c); }}>{c} ×</span>)}</div>{open && <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 200, background: "#1a1a1a", border: `1px solid ${BORDER}`, borderRadius: 5, marginTop: 4, maxHeight: 220, overflow: "hidden", display: "flex", flexDirection: "column" }}><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…" autoFocus style={{ width: "100%", background: BG_INPUT, border: "none", borderBottom: `1px solid ${BORDER}`, padding: "10px 13px", color: TEXT, fontSize: 13, outline: "none", boxSizing: "border-box", fontFamily: "inherit" }} /><div style={{ overflowY: "auto", flex: 1 }}>{filtered.slice(0, 50).map(c => { const act = selected.includes(c); return <div key={c} onClick={() => toggle(c)} style={{ padding: "8px 13px", fontSize: 12, color: act ? ACCENT : TEXT, cursor: selected.length >= 10 && !act ? "default" : "pointer", opacity: selected.length >= 10 && !act ? 0.3 : 1, background: act ? ACCENT_SUBTLE : "transparent" }}>{c}</div>; })}</div></div>}</div>);
+}
+function CountryFilter({ items, value, onChange }) {
+  const uc = useMemo(() => { const s = new Set(); items.forEach(i => (i.countries || []).forEach(c => s.add(c))); return [...s].sort(); }, [items]);
+  if (uc.length === 0) return null;
+  return <div style={{ marginBottom: 14 }}><select value={value} onChange={e => onChange(e.target.value)} style={{ background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "8px 32px 8px 12px", color: TEXT, fontSize: 12, outline: "none", fontFamily: "inherit", appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23777' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 10px center" }}><option value="">All Countries</option>{uc.map(c => <option key={c} value={c}>{c}</option>)}</select></div>;
+}
+function ChartUpload({ value, onChange, lbl }) {
+  const fileRef = useRef(null); const [dragOver, setDragOver] = useState(false);
+  const processFile = (file) => { if (!file || !file.type.startsWith("image/")) return; const reader = new FileReader(); reader.onload = (e) => onChange(e.target.result); reader.readAsDataURL(file); };
+  useEffect(() => { const handler = (e) => { const items = e.clipboardData?.items; if (!items) return; for (const item of items) { if (item.type.startsWith("image/")) { e.preventDefault(); processFile(item.getAsFile()); return; } } }; window.addEventListener("paste", handler); return () => window.removeEventListener("paste", handler); }, []);
+  const zone = { border: `1.5px dashed ${dragOver ? ACCENT : BORDER}`, borderRadius: 8, padding: value ? 0 : "28px 16px", textAlign: "center", cursor: "pointer", background: dragOver ? `${ACCENT}11` : BG_INPUT, transition: "all 0.15s", overflow: "hidden", position: "relative" };
+  return (<div><label style={lbl}>Chart Image</label><div style={zone} onClick={() => !value && fileRef.current?.click()} onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer?.files?.[0]; if (f) processFile(f); }} onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}>{value ? <div style={{ position: "relative" }}><img src={value} alt="Chart" style={{ width: "100%", display: "block", maxHeight: 300, objectFit: "contain", background: "#000" }} /><button onClick={(e) => { e.stopPropagation(); onChange(""); }} style={{ position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: 14, background: "rgba(0,0,0,0.7)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><CloseI size={14} color="#fff" /></button></div> : <div><div style={{ fontSize: 13, color: TEXT_DIM, marginBottom: 4 }}>Tap to upload from library</div><div style={{ fontSize: 11, color: TEXT_MUTED }}>or paste / drag an image</div></div>}</div><input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ""; }} /></div>);
+}
+
+/* ═══════════════════════════════════════════════════════
+   QUICK ADD — paste link, pick domain, done
+   ═══════════════════════════════════════════════════════ */
+function QuickAdd({ onSave, onCancel }) {
+  const tax = useTaxonomy();
+  const [url, setUrl] = useState("");
+  const [domain, setDomain] = useState("");
+  const inp = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "11px 13px", color: TEXT, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
+  const sel = { ...inp, appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23777' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center" };
+  const lbl = { fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 8, display: "block" };
+  const save = () => {
+    if (!url.trim()) return;
+    const domObj = domain ? tax.domainMap[domain] : null;
+    const group = domObj ? domObj.group : "Professional";
+    const now = new Date().toISOString();
+    onSave({ id: genId(), ownerId: "local", createdAt: now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type: "Article", title: url.trim(), content: url.trim(), image_url: "", source: "", tags: [], countries: [], level_1: group, level_2: domain || "", level_3: null, level_4: null, state: STATES.LIBRARY, core_takeaway: "", date_added: now, date_learned: null, starred: false, synthesis: "", synthesisUpdatedAt: null, deleted: false, deletedAt: null });
+  };
+  return (
+    <div style={{ maxWidth: 640, padding: "0 0 60px" }}>
+      <PageHeader title="Quick Add" backLabel="Back" onBack={onCancel} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div><label style={lbl}>Link</label><input style={inp} value={url} onChange={e => setUrl(e.target.value)} placeholder="Paste URL" autoFocus /></div>
+        <div><label style={lbl}>Domain</label><select style={sel} value={domain} onChange={e => setDomain(e.target.value)}><option value="">— Pick later —</option><optgroup label="Professional">{tax.proDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup><optgroup label="Personal">{tax.perDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup></select></div>
+        <button onClick={save} style={{ padding: "13px 0", fontSize: 14, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: ACCENT, color: "#111", cursor: "pointer" }}>Save</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   TAG PICKER — select from existing tags or create new
+   ═══════════════════════════════════════════════════════ */
+function TagPicker({ selected, onChange, allTags, onCreateTag }) {
+  const [newTag, setNewTag] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const toggle = (tag) => { onChange(selected.includes(tag) ? selected.filter(t => t !== tag) : [...selected, tag]); };
+  const create = () => { const t = newTag.trim(); if (!t || allTags.includes(t)) return; onCreateTag(t); onChange([...selected, t]); setNewTag(""); setShowCreate(false); };
+  const pill = (tag, active) => ({ display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 11px", fontSize: 11, fontWeight: active ? 600 : 400, borderRadius: 4, border: active ? "none" : `1px solid ${BORDER}`, background: active ? ACCENT_SUBTLE : "transparent", color: active ? ACCENT : TEXT_DIM, cursor: "pointer", fontFamily: "inherit" });
+  const inp = { background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "8px 11px", color: TEXT, fontSize: 13, outline: "none", fontFamily: "inherit", flex: 1 };
+  return (<div>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {allTags.map(t => <button key={t} onClick={() => toggle(t)} style={pill(t, selected.includes(t))}>{t}{selected.includes(t) ? " ×" : ""}</button>)}
+      <button onClick={() => setShowCreate(!showCreate)} style={pill("+ New", false)}>+ New</button>
+    </div>
+    {showCreate && <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+      <input style={inp} value={newTag} onChange={e => setNewTag(e.target.value)} placeholder="Tag name" autoFocus onKeyDown={e => { if (e.key === "Enter") create(); }} />
+      <button onClick={create} style={{ padding: "8px 14px", fontSize: 12, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: ACCENT, color: "#111", cursor: "pointer" }}>Add</button>
+    </div>}
+  </div>);
+}
+
+/* ═══════════════════════════════════════════════════════
+   ADD / EDIT — cascading domain→category→subcategory
+   ═══════════════════════════════════════════════════════ */
+function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, allTags, onCreateTag }) {
+  const tax = useTaxonomy();
+  const isEdit = !!item;
+  const [type, setType] = useState(item?.type || "Article");
+  const [title, setTitle] = useState(item?.title || "");
+  const [domain, setDomain] = useState(item?.level_2 || initDomain || "");
+  const [cat, setCat] = useState(item?.level_3 || initCat || "");
+  const [subcat, setSubcat] = useState(item?.level_4 || initSub || "");
+  const [content, setContent] = useState(item?.content || "");
+  const [image_url, setImgUrl] = useState(item?.image_url || "");
+  const [source, setSource] = useState(item?.source || "");
+  const [tags, setTags] = useState(item?.tags || []);
+  const [countries, setCountries] = useState(item?.countries || []);
+  const [countryErr, setCountryErr] = useState("");
+
+  const domainObj = domain ? tax.domainMap[domain] : null;
+  const catKeys = domainObj ? Object.keys(domainObj.categories) : [];
+  const subcatKeys = domainObj && cat && domainObj.categories[cat] ? domainObj.categories[cat] : [];
+  const needsCountries = COUNTRY_DOMAINS.includes(domain);
+  const group = domainObj ? domainObj.group : "Professional";
+
+  const save = () => {
+    if (!title.trim()) return;
+    if (needsCountries && countries.length === 0) { setCountryErr("At least one country is required."); return; }
+    setCountryErr("");
+    let state;
+    if (isEdit && item.state === STATES.LEARNED) state = STATES.LEARNED;
+    else if (title.trim() && domain) state = STATES.LIBRARY;
+    else state = STATES.WANT;
+    const wasL = item?.state === STATES.LEARNED;
+    const trans = state === STATES.LEARNED && !wasL;
+    const now = new Date().toISOString();
+    onSave({ id: item?.id || genId(), ownerId: item?.ownerId || "local", createdAt: item?.createdAt || now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type, title: title.trim(), content, image_url: type === "Chart" ? image_url : "", source, tags, countries: needsCountries ? countries : (item?.countries || []), level_1: group, level_2: domain, level_3: cat || null, level_4: subcat || null, state, core_takeaway: item?.core_takeaway || "", date_added: item?.date_added || now, date_learned: trans ? now : (item?.date_learned || null), starred: item?.starred || false, synthesis: item?.synthesis || "", synthesisUpdatedAt: item?.synthesisUpdatedAt || null, deleted: false, deletedAt: null });
+  };
+  const lbl = { fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 8, display: "block" };
+  const inp = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "11px 13px", color: TEXT, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
+  const sel = { ...inp, appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23777' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center" };
+  return (
+    <div style={{ maxWidth: 640, padding: "0 0 60px" }}>
+      <PageHeader title={isEdit ? "Edit Item" : "Add Item"} backLabel="Back" onBack={onCancel} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+        <div><label style={lbl}>Type</label><div style={{ display: "flex", gap: 6 }}>{TYPES.map(t => <button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: "9px 0", fontSize: 12, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: type === t ? "none" : `1px solid ${BORDER}`, background: type === t ? ACCENT : "transparent", color: type === t ? "#111" : TEXT_DIM, cursor: "pointer" }}>{t}</button>)}</div></div>
+        <div><label style={lbl}>Title</label><input style={inp} value={title} onChange={e => setTitle(e.target.value)} /></div>
+        <div><label style={lbl}>Domain</label><select style={sel} value={domain} onChange={e => { setDomain(e.target.value); setCat(""); setSubcat(""); if (!COUNTRY_DOMAINS.includes(e.target.value)) { setCountries([]); setCountryErr(""); } }}><option value=""></option><optgroup label="Professional">{tax.proDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup><optgroup label="Personal">{tax.perDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup></select></div>
+        {catKeys.length > 0 && <div><label style={lbl}>Category</label><select style={sel} value={cat} onChange={e => { setCat(e.target.value); setSubcat(""); }}><option value="">— None —</option>{catKeys.map(k => <option key={k} value={k}>{k}</option>)}</select></div>}
+        {subcatKeys.length > 0 && <div><label style={lbl}>Subcategory</label><select style={sel} value={subcat} onChange={e => setSubcat(e.target.value)}><option value="">— None —</option>{subcatKeys.map(k => <option key={k} value={k}>{k}</option>)}</select></div>}
+        {needsCountries && <div><label style={lbl}>Countries</label><CountryPicker selected={countries} onChange={c => { setCountries(c); if (c.length > 0) setCountryErr(""); }} />{countryErr && <div style={{ fontSize: 11, color: "#c44", marginTop: 6 }}>{countryErr}</div>}</div>}
+        {type !== "Chart" && <div><label style={lbl}>Link</label><input style={inp} value={content} onChange={e => setContent(e.target.value)} /></div>}
+        {type === "Chart" && <ChartUpload value={image_url} onChange={setImgUrl} lbl={lbl} />}
+        <div><label style={lbl}>Author</label><input style={inp} value={source} onChange={e => setSource(e.target.value)} /></div>
+        <div><label style={lbl}>Tags</label><TagPicker selected={tags} onChange={setTags} allTags={allTags} onCreateTag={onCreateTag} /></div>
+        <div style={{ display: "flex", gap: 10, marginTop: 6 }}><button onClick={save} style={{ flex: 1, padding: "13px 0", fontSize: 14, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: ACCENT, color: "#111", cursor: "pointer" }}>Save</button><button onClick={onCancel} style={{ flex: 1, padding: "13px 0", fontSize: 14, fontWeight: 500, fontFamily: "inherit", borderRadius: 5, border: `1px solid ${BORDER}`, background: "transparent", color: TEXT_DIM, cursor: "pointer" }}>Cancel</button></div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   ITEM DETAIL
+   ═══════════════════════════════════════════════════════ */
+function ItemDetail({ item, onBack, onEdit, onDelete, onToggleStar, onSynthesisChange, onMarkLearned }) {
+  const [showImg, setShowImg] = useState(false); const [synthText, setSynthText] = useState(item.synthesis || ""); const [editing, setEditing] = useState(false); const [error, setError] = useState(""); const [showDeleteConfirm, setShowDeleteConfirm] = useState(false); const synthTimer = useRef(null);
+  const bp = [item.level_2, item.level_3, item.level_4].filter(Boolean).join(" \u2192 ");
+  const isLearned = item.state === STATES.LEARNED;
+  useEffect(() => { setSynthText(item.synthesis || ""); setEditing(false); setError(""); }, [item.id, item.synthesis]);
+  const handleDraftChange = (val) => { setSynthText(val); setError(""); if (synthTimer.current) clearTimeout(synthTimer.current); synthTimer.current = setTimeout(() => { onSynthesisChange(item.id, val); }, 800); };
+  const handleSubmit = () => { if (!synthText.trim()) { setError("Synthesis cannot be empty."); return; } onSynthesisChange(item.id, synthText.trim()); onMarkLearned(item.id); setEditing(false); setError(""); };
+  const handleSaveEdit = () => { if (!synthText.trim()) { setError("Synthesis cannot be empty."); return; } onSynthesisChange(item.id, synthText.trim()); setEditing(false); setError(""); };
+  const btnS = (p) => ({ padding: "10px 20px", fontSize: 12, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, cursor: "pointer", border: p ? "none" : `1px solid ${BORDER}`, background: p ? ACCENT : "transparent", color: p ? "#111" : TEXT_DIM, marginTop: 10 });
+  const taS = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "12px 13px", color: TEXT, fontSize: 13, lineHeight: 1.6, outline: "none", boxSizing: "border-box", fontFamily: "inherit", minHeight: 100, resize: "vertical" };
+  return (
+    <div style={{ maxWidth: 640, paddingBottom: 60 }}>
+      {showImg && item.image_url && <ImageModal src={item.image_url} onClose={() => setShowImg(false)} />}
+      {showDeleteConfirm && <ConfirmModal message={`Delete "${item.title}"?`} confirmLabel="Delete" onConfirm={() => { setShowDeleteConfirm(false); onDelete(item.id); }} onCancel={() => setShowDeleteConfirm(false)} />}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 0 8px" }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: TEXT_DIM, fontSize: 13, fontFamily: "inherit", padding: 0 }}><ChevL size={14} /> Back</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={() => setShowDeleteConfirm(true)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: "#c44", fontSize: 13, fontFamily: "inherit", padding: 0 }}><TrashIcon size={12} /> Delete</button>
+          <button onClick={onEdit} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: ACCENT, fontSize: 13, fontFamily: "inherit", padding: 0 }}><EditI size={12} /> Edit</button>
+        </div>
+      </div>
+      {item.type === "Chart" && item.image_url && <div onClick={() => setShowImg(true)} style={{ cursor: "pointer", margin: "8px 0 20px", borderRadius: 6, overflow: "hidden", background: "#080808" }}><img src={item.image_url} alt={item.title} style={{ width: "100%", display: "block", maxHeight: 400, objectFit: "contain" }} /></div>}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}><Badge state={item.state} /><span style={{ fontSize: 11, color: TEXT_DIM }}>{item.type}</span><span style={{ color: TEXT_MUTED, fontSize: 11 }}>&middot;</span><span style={{ fontSize: 11, color: TEXT_DIM }}>{bp}</span><div style={{ marginLeft: "auto" }}><Star starred={item.starred} enabled={isLearned} onToggle={onToggleStar} /></div></div>
+      <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em", margin: "0 0 14px", lineHeight: 1.3, color: TEXT }}>{item.title}</h1>
+      {item.source && <div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 10 }}>{item.source}</div>}
+      {item.countries?.length > 0 && <div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 10 }}>Countries: {item.countries.join(", ")}</div>}
+      {item.tags?.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>{item.tags.map(t => <span key={t} style={{ fontSize: 10, fontWeight: 600, padding: "3px 9px", borderRadius: 3, background: ACCENT_SUBTLE, color: ACCENT }}>{t}</span>)}</div>}
+      {item.content?.trim() && (() => { const isMobile = typeof navigator !== "undefined" && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent); const lp = isMobile ? {} : { target: "_blank", rel: "noopener noreferrer" }; return <a href={item.content} {...lp} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: ACCENT, textDecoration: "none", marginBottom: 14 }}><Svg size={12}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke={ACCENT} /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke={ACCENT} /></Svg>Link</a>; })()}
+      <div style={{ borderTop: `1px solid ${SEPARATOR}`, marginTop: 16, paddingTop: 16 }}>
+        <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 10 }}>Synthesis</div>
+        {!isLearned && (<><textarea value={synthText} onChange={e => handleDraftChange(e.target.value)} style={taS} />{item.synthesisUpdatedAt && <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 6 }}>Draft saved</div>}{error && <div style={{ fontSize: 11, color: "#c44", marginTop: 8 }}>{error}</div>}<button onClick={handleSubmit} style={btnS(true)}>Submit &amp; mark as learned</button></>)}
+        {isLearned && !editing && (<>{synthText ? <div style={{ fontSize: 13, lineHeight: 1.65, color: TEXT, whiteSpace: "pre-wrap" }}>{synthText}</div> : <div style={{ fontSize: 12, color: TEXT_MUTED }}>No synthesis written.</div>}<button onClick={() => setEditing(true)} style={btnS(false)}>Edit Synthesis</button></>)}
+        {isLearned && editing && (<><textarea value={synthText} onChange={e => { setSynthText(e.target.value); setError(""); }} style={taS} />{error && <div style={{ fontSize: 11, color: "#c44", marginTop: 8 }}>{error}</div>}<div style={{ display: "flex", gap: 8, marginTop: 10 }}><button onClick={handleSaveEdit} style={btnS(true)}>Save Changes</button><button onClick={() => { setEditing(false); setSynthText(item.synthesis || ""); setError(""); }} style={btnS(false)}>Cancel</button></div></>)}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   GENERIC DRILL-DOWN NAVIGATOR
+   Handles Domain→Category→Subcategory→Types→Items
+   Used by both Library and Learned views
+   ═══════════════════════════════════════════════════════ */
+function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isStarred, compact, streak, initDomain }) {
+  const tax = useTaxonomy();
+  const [level, setLevel] = useState(() => initDomain ? "domain" : "root");
+  const [domain, setDomain] = useState(initDomain || null);
+  const [cat, setCat] = useState(null);
+  const [subcat, setSubcat] = useState(null);
+  const [contentType, setContentType] = useState(null);
+  const [countryFilter, setCountryFilter] = useState("");
+  const [flatSort, setFlatSort] = useState(null);
+  const toggleSort = (key) => setFlatSort(prev => prev === key ? null : key);
+  const internalNav = useRef(false);
+  const viewKey = isStarred ? "starred" : isLearned ? "learned" : "library";
+
+  // Sync when sidebar changes initDomain (but not when we drove it)
+  useEffect(() => {
+    if (internalNav.current) { internalNav.current = false; return; }
+    if (initDomain) { setLevel("domain"); setDomain(initDomain); setCat(null); setSubcat(null); setContentType(null); setCountryFilter(""); }
+    else { setLevel("root"); setDomain(null); setCat(null); setSubcat(null); setContentType(null); setCountryFilter(""); }
+  }, [initDomain]);
+
+  const active = items.filter(i => !i.deleted);
+  const pool = isStarred ? active.filter(i => i.starred && i.state === STATES.LEARNED) : isLearned ? active.filter(i => i.state === STATES.LEARNED) : active.filter(i => i.state !== STATES.LEARNED);
+
+  const go = (lv, d, c, s, t) => {
+    internalNav.current = true;
+    setLevel(lv); setDomain(d || null); setCat(c || null); setSubcat(s || null); setContentType(t || null);
+    if (d !== domain) setCountryFilter("");
+    if (lv === "root") onNav(viewKey);
+    else if (d) onNav(viewKey, d);
+  };
+
+  // ROOT — show Pro and Per domain lists
+  if (level === "root") {
+    const proDomains = tax.proDomains;
+    const perDomains = tax.perDomains;
+    const proCount = pool.filter(i => i.level_1 === "Professional").length;
+    const perCount = pool.filter(i => i.level_1 === "Personal").length;
+    const streakText = streak && streak.current > 0 ? streak.current + " day" + (streak.current !== 1 ? "s" : "") : null;
+    const readOnly = isLearned || isStarred;
+    const rootTitle = isStarred ? "Starred" : isLearned ? "Learned" : null;
+    return (<div>
+      {rootTitle && <PageHeader title={rootTitle} subtitle={`${pool.length} items`} />}
+      {isLearned && streakText && <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16, marginTop: -8 }}><FireIcon size={16} /><span style={{ fontSize: 13, fontWeight: 600, color: "#e8590c" }}>{streakText}</span><span style={{ fontSize: 12, color: TEXT_DIM }}>streak</span></div>}
+      {isLearned && streak && streak.longest > streak.current && <div style={{ fontSize: 11, color: TEXT_MUTED, marginBottom: 16, marginTop: streakText ? -8 : -8 }}>Best: {streak.longest} day{streak.longest !== 1 ? "s" : ""}</div>}
+      {!readOnly && <PageHeader title="Professional" subtitle={`${proCount} items`} onAdd={() => onNav("add")} compact={compact} />}
+      {readOnly && <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, padding: "8px 0 4px" }}>Professional</div>}
+      {proDomains.map((d, idx) => { const n = pool.filter(i => i.level_2 === d.name).length; return <ListRow key={d.name} title={d.name} meta={`${n} items`} onClick={() => go("domain", d.name)} noBorder={idx === proDomains.length - 1} compact={compact} />; })}
+      {!readOnly && <AddBtn label="Add domain" onClick={() => onAddTax({ type: "domain", group: "Professional" })} />}
+      <div style={{ marginTop: 28 }}>
+        {!readOnly && <PageHeader title="Personal" subtitle={`${perCount} items`} onAdd={() => onNav("add", null, null, null, "Personal")} compact={compact} />}
+        {readOnly && <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, padding: "8px 0 4px" }}>Personal</div>}
+        {perDomains.map((d, idx) => { const n = pool.filter(i => i.level_2 === d.name).length; return <ListRow key={d.name} title={d.name} meta={`${n} items`} onClick={() => go("domain", d.name)} noBorder={idx === perDomains.length - 1} compact={compact} />; })}
+        {!readOnly && <AddBtn label="Add domain" onClick={() => onAddTax({ type: "domain", group: "Personal" })} />}
+      </div>
+    </div>);
+  }
+
+  // DOMAIN — show categories (or type rows if none)
+  if (level === "domain") {
+    const dObj = tax.domainMap[domain];
+    const catKeys = dObj ? Object.keys(dObj.categories) : [];
+    const domainItems = pool.filter(i => i.level_2 === domain);
+    const showCountry = COUNTRY_DOMAINS.includes(domain);
+    if (catKeys.length > 0) {
+      return (<div>
+        <PageHeader title={domain} subtitle={`${domainItems.length} items`} backLabel={isStarred ? "Starred" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain)} compact={compact} />
+        {catKeys.map((k, idx) => { const n = domainItems.filter(i => i.level_3 === k).length; return <ListRow key={k} title={k} meta={`${n} items`} onClick={() => go("category", domain, k)} noBorder={idx === catKeys.length - 1} compact={compact} />; })}
+        {/* Items with no category */}
+        {(() => { const unc = domainItems.filter(i => !i.level_3).length; return unc > 0 ? <ListRow title="Uncategorized" meta={`${unc} items`} onClick={() => go("types", domain, "__none__")} /> : null; })()}
+        {!(isLearned || isStarred) && <AddBtn label="Add category" onClick={() => onAddTax({ type: "category", domain })} />}
+      </div>);
+    }
+    // No categories — show type rows directly
+    const cfItems = showCountry && countryFilter ? domainItems.filter(i => (i.countries || []).includes(countryFilter)) : domainItems;
+    const flatMode = showCountry && !!countryFilter && domain === "Geopolitics";
+    if (flatMode) {
+      const sorted = sortItems(cfItems, flatSort || "added");
+      return (<div><PageHeader title={domain} subtitle={`${cfItems.length} items`} backLabel={isStarred ? "Starred" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain)} compact={compact} /><CountryFilter items={domainItems} value={countryFilter} onChange={setCountryFilter} /><div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 14 }}>{countryFilter} &bull; {sorted.length} items</div><SortBar mode={flatSort || "added"} onChange={toggleSort} />{sorted.map((it, idx) => <ListRow key={it.id} title={`${it.title} \u2014 ${it.type}`} onClick={() => onNav("detail", it.id)} noBorder={idx === sorted.length - 1} compact={compact} />)}</div>);
+    }
+    const typeRows = TYPES.map(t => ({ type: t, count: cfItems.filter(i => i.type === t).length }));
+    return (<div><PageHeader title={domain} subtitle={`${cfItems.length} items`} backLabel={isStarred ? "Starred" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain)} compact={compact} />{showCountry && <CountryFilter items={domainItems} value={countryFilter} onChange={setCountryFilter} />}<TypeRowsOrFlat items={cfItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, null, null, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} addBtn={!isLearned ? <AddBtn label="Add category" onClick={() => onAddTax({ type: "category", domain })} /> : null} /></div>);
+  }
+
+  // CATEGORY — show subcategories (or type rows if none)
+  if (level === "category") {
+    const dObj = tax.domainMap[domain];
+    const subcats = dObj && dObj.categories[cat] ? dObj.categories[cat] : [];
+    const catItems = pool.filter(i => i.level_2 === domain && i.level_3 === cat);
+    if (subcats.length > 0) {
+      return (<div>
+        <PageHeader title={cat} subtitle={`${catItems.length} items`} backLabel={domain} onBack={() => go("domain", domain)} onEdit={() => onRenameTax({ level: "category", oldName: cat, domain })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain, cat)} compact={compact} />
+        {subcats.map((s, idx) => { const n = catItems.filter(i => i.level_4 === s).length; return <ListRow key={s} title={s} meta={`${n} items`} onClick={() => go("subcategory", domain, cat, s)} noBorder={idx === subcats.length - 1} compact={compact} />; })}
+        {(() => { const unc = catItems.filter(i => !i.level_4).length; return unc > 0 ? <ListRow title="Uncategorized" meta={`${unc} items`} onClick={() => go("types", domain, cat, "__none__")} /> : null; })()}
+        {!(isLearned || isStarred) && <AddBtn label="Add subcategory" onClick={() => onAddTax({ type: "subcategory", domain, category: cat })} />}
+      </div>);
+    }
+    const typeRows = TYPES.map(t => ({ type: t, count: catItems.filter(i => i.type === t).length }));
+    return (<div><PageHeader title={cat} subtitle={`${catItems.length} items`} backLabel={domain} onBack={() => go("domain", domain)} onEdit={() => onRenameTax({ level: "category", oldName: cat, domain })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain, cat)} compact={compact} /><TypeRowsOrFlat items={catItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, cat, null, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} addBtn={!isLearned ? <AddBtn label="Add subcategory" onClick={() => onAddTax({ type: "subcategory", domain, category: cat })} /> : null} /></div>);
+  }
+
+  // SUBCATEGORY — type rows
+  if (level === "subcategory") {
+    const scItems = pool.filter(i => i.level_2 === domain && i.level_3 === cat && i.level_4 === subcat);
+    return (<div><PageHeader title={subcat} subtitle={`${scItems.length} items`} backLabel={cat} onBack={() => go("category", domain, cat)} onEdit={() => onRenameTax({ level: "subcategory", oldName: subcat, domain, category: cat })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain, cat, subcat)} compact={compact} /><TypeRowsOrFlat items={scItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, cat, subcat, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} /></div>);
+  }
+
+  // TYPES — item list filtered by type
+  if (level === "types") {
+    let base = pool.filter(i => i.level_2 === domain);
+    if (cat === "__none__") base = base.filter(i => !i.level_3);
+    else if (cat) { base = base.filter(i => i.level_3 === cat); if (subcat === "__none__") base = base.filter(i => !i.level_4); else if (subcat) base = base.filter(i => i.level_4 === subcat); }
+    if (contentType) base = base.filter(i => i.type === contentType);
+    const showCountry = COUNTRY_DOMAINS.includes(domain);
+    const fl = showCountry && countryFilter ? base.filter(i => (i.countries || []).includes(countryFilter)) : base;
+    const backLabel = subcat && subcat !== "__none__" ? subcat : cat && cat !== "__none__" ? cat : domain;
+    const backLevel = subcat && subcat !== "__none__" ? "subcategory" : cat && cat !== "__none__" ? "category" : "domain";
+    const typeSortKey = flatSort || "added";
+    const sorted = sortItems(fl, typeSortKey);
+    if (contentType === "Chart") {
+      return (<div><PageHeader title="Charts" subtitle={`${fl.length} items`} backLabel={backLabel} onBack={() => go(backLevel, domain, cat, subcat)} /><SortBar mode={typeSortKey} onChange={toggleSort} />{fl.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No charts yet</div>}<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{sorted.map(it => (<div key={it.id} onClick={() => onNav("detail", it.id)} style={{ cursor: "pointer" }}>{it.image_url ? <div style={{ borderRadius: 5, overflow: "hidden", background: "#080808", aspectRatio: "4/3" }}><img src={it.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /></div> : <div style={{ borderRadius: 5, background: "#141414", aspectRatio: "4/3", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: 11, color: TEXT_MUTED }}>No image</span></div>}<div style={{ fontSize: 12, fontWeight: 500, color: TEXT, marginTop: 6, lineHeight: 1.3 }}>{it.title}</div><div style={{ fontSize: 10, color: TEXT_DIM, marginTop: 2 }}><Badge state={it.state} /></div></div>))}</div></div>);
+    }
+    return (<div><PageHeader title={(contentType || "All") + "s"} subtitle={`${fl.length} items`} backLabel={backLabel} onBack={() => go(backLevel, domain, cat, subcat)} /><SortBar mode={typeSortKey} onChange={toggleSort} />{fl.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No items</div>}{sorted.map((it, idx) => <ListRow key={it.id} title={it.title} right={isLearned && it.starred ? <StarI size={14} color={ACCENT} fill={ACCENT} /> : !isLearned ? <Badge state={it.state} /> : null} onClick={() => onNav("detail", it.id)} noBorder={idx === sorted.length - 1} />)}</div>);
+  }
+  return null;
+}
+
+/* ═══════════════════════════════════════════════════════
+   SEARCH VIEW
+   ═══════════════════════════════════════════════════════ */
+function SearchView({ items, onNav }) {
+  const [query, setQuery] = useState(""); const [dQ, setDQ] = useState(""); const tr = useRef(null); const ir = useRef(null);
+  useEffect(() => { ir.current?.focus(); }, []);
+  useEffect(() => { clearTimeout(tr.current); tr.current = setTimeout(() => setDQ(query), 200); return () => clearTimeout(tr.current); }, [query]);
+  const results = useMemo(() => { const q = dQ.trim().toLowerCase(); if (!q) return []; const a = items.filter(i => !i.deleted); const tk = q.split(/\s+/); return a.filter(it => { const f = [it.title || "", it.source || "", it.content || "", (it.countries || []).join(" "), (it.tags || []).join(" "), it.synthesis || "", it.level_2 || "", it.level_3 || "", it.level_4 || ""].join(" ").toLowerCase(); return tk.every(t => f.includes(t)); }).sort((a, b) => (b.date_learned || b.date_added || "").localeCompare(a.date_learned || a.date_added || "")); }, [dQ, items]);
+  const inp = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "12px 14px", color: TEXT, fontSize: 15, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
+  return (<div><PageHeader title="Search" /><input ref={ir} style={inp} value={query} onChange={e => setQuery(e.target.value)} /><div style={{ marginTop: 16 }}>{dQ.trim() && results.length === 0 && <div style={{ fontSize: 13, color: TEXT_DIM, padding: "24px 0" }}>No results</div>}{results.map((it, idx) => { const path = [it.level_2, it.level_3, it.level_4].filter(Boolean).join(" \u2192 "); const s = it.state === STATES.LEARNED ? "Learned" : "Library"; const m = [path, it.type, s].filter(Boolean).join(" \u2022 "); return <ListRow key={it.id} title={it.title} meta={m} onClick={() => onNav("detail", it.id)} noBorder={idx === results.length - 1} />; })}</div></div>);
+}
+
+/* ═══════════════════════════════════════════════════════
+   RECENTLY ADDED VIEW
+   ═══════════════════════════════════════════════════════ */
+function RecentView({ items, onNav }) {
+  const recent = useMemo(() => {
+    return items.filter(i => !i.deleted).sort((a, b) => (b.date_added || b.createdAt || "").localeCompare(a.date_added || a.createdAt || "")).slice(0, 50);
+  }, [items]);
+  return (<div>
+    <PageHeader title="Recent" subtitle={`Last ${recent.length} items`} />
+    {recent.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No items yet</div>}
+    {recent.map((it, idx) => {
+      const path = [it.level_2, it.level_3, it.level_4].filter(Boolean).join(" \u2192 ");
+      const ago = (() => { const ms = Date.now() - new Date(it.date_added || it.createdAt).getTime(); const m = Math.floor(ms / 60000); if (m < 60) return m + "m ago"; const h = Math.floor(m / 60); if (h < 24) return h + "h ago"; const d = Math.floor(h / 24); return d + "d ago"; })();
+      const m = [path || "Uncategorized", it.type, ago].filter(Boolean).join(" \u2022 ");
+      return <ListRow key={it.id} title={it.title} meta={m} right={<Badge state={it.state} />} onClick={() => onNav("detail", it.id)} noBorder={idx === recent.length - 1} />;
+    })}
+  </div>);
+}
+
+/* ═══════════════════════════════════════════════════════
+   SORT BAR — inline sort toggle for item lists
+   ═══════════════════════════════════════════════════════ */
+const SORT_MODES = [{ key: "added", label: "Date Added" }, { key: "learned", label: "Date Learned" }, { key: "alpha", label: "A\u2013Z" }];
+function SortBar({ mode, onChange }) {
+  return (<div style={{ display: "flex", gap: 6, marginBottom: 12 }}>{SORT_MODES.map(s => (
+    <button key={s.key} onClick={() => onChange(s.key)} style={{ padding: "5px 10px", fontSize: 11, fontWeight: mode === s.key ? 600 : 400, fontFamily: "inherit", borderRadius: 4, border: mode === s.key ? "none" : `1px solid ${BORDER}`, background: mode === s.key ? ACCENT_SUBTLE : "transparent", color: mode === s.key ? ACCENT : TEXT_DIM, cursor: "pointer" }}>{s.label}{mode === s.key ? " ×" : ""}</button>
+  ))}</div>);
+}
+function sortItems(list, mode) {
+  const arr = [...list];
+  if (mode === "alpha") return arr.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+  if (mode === "learned") return arr.sort((a, b) => (b.date_learned || "").localeCompare(a.date_learned || ""));
+  return arr.sort((a, b) => (b.date_added || b.createdAt || "").localeCompare(a.date_added || a.createdAt || ""));
+}
+function TypeRowsOrFlat({ items, flatSort, onToggleSort, onTypeClick, onItemClick, isLearned, compact, addBtn }) {
+  if (flatSort) {
+    const sorted = sortItems(items, flatSort);
+    return (<div>
+      <SortBar mode={flatSort} onChange={onToggleSort} />
+      {sorted.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No items</div>}
+      {sorted.map((it, idx) => <ListRow key={it.id} title={it.title} meta={it.type} right={isLearned && it.starred ? <StarI size={14} color={ACCENT} fill={ACCENT} /> : !isLearned ? <Badge state={it.state} /> : null} onClick={() => onItemClick(it.id)} noBorder={idx === sorted.length - 1} compact={compact} />)}
+    </div>);
+  }
+  const typeRows = TYPES.map(t => ({ type: t, count: items.filter(i => i.type === t).length }));
+  return (<div>
+    <SortBar mode={null} onChange={onToggleSort} />
+    {typeRows.map((r, i) => <ListRow key={r.type} title={`${r.type}s (${r.count})`} onClick={r.count > 0 ? () => onTypeClick(r.type) : undefined} noBorder={i === typeRows.length - 1 && !addBtn} compact={compact} />)}
+    {addBtn}
+  </div>);
+}
+
+/* ═══════════════════════════════════════════════════════
+   BULK MOVE MODAL — multi-select items, move to new location
+   ═══════════════════════════════════════════════════════ */
+function BulkMoveView({ items, onMove, onBack }) {
+  const tax = useTaxonomy();
+  const [selected, setSelected] = useState(new Set());
+  const [step, setStep] = useState("select"); // select, target
+  const [tDomain, setTDomain] = useState("");
+  const [tCat, setTCat] = useState("");
+  const [tSub, setTSub] = useState("");
+  const active = items.filter(i => !i.deleted);
+  const toggle = (id) => { setSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
+  const selAll = () => { if (selected.size === active.length) setSelected(new Set()); else setSelected(new Set(active.map(i => i.id))); };
+  const domObj = tDomain ? tax.domainMap[tDomain] : null;
+  const catKeys = domObj ? Object.keys(domObj.categories) : [];
+  const subKeys = domObj && tCat && domObj.categories[tCat] ? domObj.categories[tCat] : [];
+  const inp = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "11px 13px", color: TEXT, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit", appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23777' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 13px center" };
+  const lbl = { fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 8, display: "block" };
+  const cb = (checked) => ({ width: 18, height: 18, borderRadius: 3, border: checked ? "none" : `1.5px solid ${TEXT_MUTED}`, background: checked ? ACCENT : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer" });
+  if (step === "select") {
+    return (<div style={{ maxWidth: 640, paddingBottom: 60 }}>
+      <PageHeader title="Bulk Move" subtitle={`${selected.size} selected`} backLabel="Back" onBack={onBack} />
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <button onClick={selAll} style={{ padding: "8px 14px", fontSize: 12, fontWeight: 500, fontFamily: "inherit", borderRadius: 5, border: `1px solid ${BORDER}`, background: "transparent", color: TEXT_DIM, cursor: "pointer" }}>{selected.size === active.length ? "Deselect All" : "Select All"}</button>
+        {selected.size > 0 && <button onClick={() => setStep("target")} style={{ padding: "8px 14px", fontSize: 12, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: ACCENT, color: "#111", cursor: "pointer" }}>Move {selected.size} item{selected.size !== 1 ? "s" : ""}</button>}
+      </div>
+      {active.map((it, idx) => (<div key={it.id} onClick={() => toggle(it.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: idx < active.length - 1 ? `1px solid ${SEPARATOR}` : "none", cursor: "pointer" }}>
+        <div style={cb(selected.has(it.id))}>{selected.has(it.id) && <span style={{ color: "#111", fontSize: 12, fontWeight: 700 }}>✓</span>}</div>
+        <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 500, color: TEXT, lineHeight: 1.3 }}>{it.title}</div><div style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>{[it.level_2, it.level_3, it.level_4].filter(Boolean).join(" \u2192 ")} \u2022 {it.type}</div></div>
+      </div>))}
+    </div>);
+  }
+  return (<div style={{ maxWidth: 640, paddingBottom: 60 }}>
+    <PageHeader title="Move To" subtitle={`${selected.size} items`} backLabel="Back" onBack={() => setStep("select")} />
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div><label style={lbl}>Domain</label><select style={inp} value={tDomain} onChange={e => { setTDomain(e.target.value); setTCat(""); setTSub(""); }}><option value="">— Select —</option><optgroup label="Professional">{tax.proDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup><optgroup label="Personal">{tax.perDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup></select></div>
+      {catKeys.length > 0 && <div><label style={lbl}>Category</label><select style={inp} value={tCat} onChange={e => { setTCat(e.target.value); setTSub(""); }}><option value="">— None —</option>{catKeys.map(k => <option key={k} value={k}>{k}</option>)}</select></div>}
+      {subKeys.length > 0 && <div><label style={lbl}>Subcategory</label><select style={inp} value={tSub} onChange={e => setTSub(e.target.value)}><option value="">— None —</option>{subKeys.map(k => <option key={k} value={k}>{k}</option>)}</select></div>}
+      <button onClick={() => { if (!tDomain) return; const group = domObj ? domObj.group : "Professional"; onMove([...selected], { level_1: group, level_2: tDomain, level_3: tCat || null, level_4: tSub || null }); }} style={{ padding: "13px 0", fontSize: 14, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: tDomain ? ACCENT : TEXT_MUTED, color: "#111", cursor: tDomain ? "pointer" : "default" }}>Move {selected.size} item{selected.size !== 1 ? "s" : ""}</button>
+    </div>
+  </div>);
+}
+
+/* ═══════════════════════════════════════════════════════
+   SETTINGS VIEW
+   ═══════════════════════════════════════════════════════ */
+function SettingsView({ items, onExport, onImport, onBulkMove, lastExport, streak, customTax, onRemoveCategory, allTags, onRemoveTag }) {
+  const active = items.filter(i => !i.deleted);
+  const totalItems = active.length;
+  const learnedCount = active.filter(i => i.state === STATES.LEARNED).length;
+  const fileRef = useRef(null);
+  const [importMsg, setImportMsg] = useState(null);
+  let backupColor = TEXT_DIM; let backupLabel = "Never exported"; let backupDays = null;
+  if (lastExport) { backupDays = Math.floor((Date.now() - new Date(lastExport).getTime()) / 86400000); backupLabel = backupDays === 0 ? "Today" : backupDays + " day" + (backupDays !== 1 ? "s" : "") + " ago"; if (backupDays >= 14) backupColor = "#c44"; else if (backupDays >= 7) backupColor = "#c9a84c"; }
+  const rs = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 0", borderBottom: "1px solid " + SEPARATOR };
+  const handleFile = async (e) => { const f = e.target.files?.[0]; if (!f) return; e.target.value = ""; try { const r = await doImport(f, items); onImport(r.items); setImportMsg(`Imported ${r.added} items (${r.skipped} skipped)`); } catch (err) { setImportMsg("Error: " + err); } };
+  const UploadIcon = ({ size = 16, color = TEXT_DIM }) => <Svg size={size}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" stroke={color}/><path d="M17 8l-5-5-5 5" stroke={color}/><path d="M12 3v12" stroke={color}/></Svg>;
+  const MoveIcon = ({ size = 16, color = TEXT_DIM }) => <Svg size={size}><path d="M5 12h14" stroke={color}/><path d="M12 5l7 7-7 7" stroke={color}/></Svg>;
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <PageHeader title="Settings" />
+      <div style={rs}><div><div style={{ fontSize: 14, color: TEXT, fontWeight: 500 }}>Total items</div><div style={{ fontSize: 12, color: TEXT_DIM, marginTop: 2 }}>{totalItems} active ({learnedCount} learned)</div></div></div>
+      <div style={rs}><div><div style={{ fontSize: 14, color: TEXT, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}><FireIcon size={16} /> Streak</div><div style={{ fontSize: 12, color: TEXT_DIM, marginTop: 2 }}>{streak.current > 0 ? streak.current + " day" + (streak.current !== 1 ? "s" : "") : "No active streak"}</div></div>{streak.longest > 0 && <div style={{ fontSize: 12, color: TEXT_MUTED }}>Best: {streak.longest}</div>}</div>
+      <div style={Object.assign({}, rs, { cursor: "pointer" })} onClick={onBulkMove}><div><div style={{ fontSize: 14, color: TEXT, fontWeight: 500, display: "flex", alignItems: "center", gap: 8 }}><MoveIcon /> Bulk Move</div><div style={{ fontSize: 12, color: TEXT_DIM, marginTop: 2 }}>Multi-select and move items between domains</div></div></div>
+      <div style={Object.assign({}, rs, { cursor: "pointer" })} onClick={onExport}><div><div style={{ fontSize: 14, color: TEXT, fontWeight: 500, display: "flex", alignItems: "center", gap: 8 }}><DownloadIcon size={16} color={TEXT_DIM} /> Export Data</div><div style={{ fontSize: 12, color: TEXT_DIM, marginTop: 2 }}>Download all data as JSON</div></div></div>
+      <div style={Object.assign({}, rs, { cursor: "pointer" })} onClick={() => fileRef.current?.click()}><div><div style={{ fontSize: 14, color: TEXT, fontWeight: 500, display: "flex", alignItems: "center", gap: 8 }}><UploadIcon /> Import Data</div><div style={{ fontSize: 12, color: TEXT_DIM, marginTop: 2 }}>Merge from JSON export (adds missing IDs only)</div></div></div>
+      <input ref={fileRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleFile} />
+      {importMsg && <div style={{ fontSize: 12, color: importMsg.startsWith("Error") ? "#c44" : ACCENT, padding: "8px 0" }}>{importMsg}</div>}
+      <div style={Object.assign({}, rs, { cursor: "pointer" })} onClick={onExport}><div><div style={{ fontSize: 14, color: TEXT, fontWeight: 500 }}>Last backup</div><div style={{ fontSize: 12, color: backupColor, marginTop: 2, fontWeight: backupDays !== null && backupDays >= 14 ? 600 : 400 }}>{backupLabel}{backupDays !== null && backupDays >= 14 ? " \u2014 export now" : ""}</div></div></div>
+      {allTags.length > 0 && <div style={{ marginTop: 20 }}><div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 10 }}>Tags</div><div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{allTags.map(t => <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 500, padding: "4px 10px", borderRadius: 4, background: ACCENT_SUBTLE, color: ACCENT }}>{t}<button onClick={() => onRemoveTag(t)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, lineHeight: 1, fontSize: 13, color: ACCENT }}>×</button></span>)}</div></div>}
+      {customTax.length > 0 && <div style={{ marginTop: 20 }}><div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 10 }}>Custom Categories</div>{customTax.map((c, i) => <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: i < customTax.length - 1 ? "1px solid " + SEPARATOR : "none" }}><div><div style={{ fontSize: 13, color: TEXT }}>{c.name}</div><div style={{ fontSize: 11, color: TEXT_MUTED }}>{c.type === "domain" ? (c.group + " domain") : c.type === "category" ? (c.domain + " \u2192 category") : c.type === "subcategory" ? (c.domain + " \u2192 " + c.category + " \u2192 subcategory") : (c.type + ": " + (c.from || "") + " \u2192 " + (c.to || ""))}</div></div><button onClick={() => onRemoveCategory(c.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><TrashIcon size={12} color={TEXT_MUTED} /></button></div>)}</div>}
+      <div style={Object.assign({}, rs, { borderBottom: "none" })}><div><div style={{ fontSize: 11, color: TEXT_MUTED }}>Env: Prototype</div></div></div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   SIDEBAR — domains only, grouped Pro/Personal
+   ═══════════════════════════════════════════════════════ */
+function Sidebar({ view, activeDomain, onNav, items }) {
+  const tax = useTaxonomy();
+  const lib = useNavCounts(items, "library"); const lrn = useNavCounts(items, "learned");
+  const si = (active, indent) => ({ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px 8px " + (16 + (indent||0)) + "px", color: active ? ACCENT : TEXT_DIM, fontSize: (indent||0) > 0 ? 12.5 : 13, fontWeight: active ? 600 : 400, cursor: "pointer", background: "transparent", borderLeft: active ? "2px solid " + ACCENT : "2px solid transparent", transition: "all 0.15s", whiteSpace: "nowrap" });
+  const ct = (n) => <span style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 400, marginLeft: 2 }}>({n})</span>;
+  const isLib = view === "library";
+  const isLrn = view === "learned";
+  return (
+    <div style={{ width: 220, background: BG, borderRight: "1px solid " + SEPARATOR, display: "flex", flexDirection: "column", height: "100vh", position: "fixed", left: 0, top: 0, zIndex: 50, overflowY: "auto" }}>
+      <div style={{ padding: "24px 18px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}><div style={{ fontSize: 13.5, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: ACCENT }}>The Archive</div><div style={{ display: "flex", gap: 8 }}><div onClick={() => onNav("search")} style={{ cursor: "pointer", padding: 4 }}><SearchIcon size={15} color={view === "search" ? ACCENT : TEXT_DIM} /></div><div onClick={() => onNav("settings")} style={{ cursor: "pointer", padding: 4 }}><SettingsIcon size={15} color={view === "settings" ? ACCENT : TEXT_DIM} /></div></div></div>
+      <div onClick={() => onNav("library")} style={si(isLib && !activeDomain, 0)}><HomeIcon size={16} color={isLib ? ACCENT : TEXT_DIM} /> Library {ct(lib._pro + lib._per)}</div>
+      <div onClick={() => onNav("recent")} style={si(view === "recent", 0)}><ClockIcon size={16} color={view === "recent" ? ACCENT : TEXT_DIM} /> Recent</div>
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Professional</div>
+      {tax.proDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 14)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Personal</div>
+      {tax.perDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 14)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
+      <div style={{ borderTop: "1px solid " + SEPARATOR, margin: "14px 16px" }} />
+      <div onClick={() => onNav("learned")} style={si(isLrn && !activeDomain, 0)}><TrophyIcon size={16} color={isLrn ? ACCENT : TEXT_DIM} /> Learned {ct(lrn._pro + lrn._per)}</div>
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Professional</div>
+      {tax.proDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 14)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Personal</div>
+      {tax.perDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 14)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MOBILE SIDEBAR — domains only, compact
+   ═══════════════════════════════════════════════════════ */
+function MobileSidebar({ view, activeDomain, onNav, items }) {
+  const tax = useTaxonomy();
+  const lib = useNavCounts(items, "library"); const lrn = useNavCounts(items, "learned");
+  const si = (active, indent) => ({ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px 7px " + (10 + (indent||0)) + "px", color: active ? ACCENT : TEXT_DIM, fontSize: (indent||0) > 0 ? 10.5 : 11, fontWeight: active ? 600 : 400, cursor: "pointer", background: "transparent", borderLeft: active ? "2px solid " + ACCENT : "2px solid transparent", transition: "all 0.15s", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
+  const ct = (n) => <span style={{ fontSize: 9, color: TEXT_MUTED, fontWeight: 400, marginLeft: 2 }}>({n})</span>;
+  const isLib = view === "library";
+  const isLrn = view === "learned";
+  return (
+    <div style={{ width: 140, minWidth: 140, background: BG, borderRight: "1px solid " + SEPARATOR, display: "flex", flexDirection: "column", height: "calc(100vh - 56px)", position: "fixed", left: 0, top: 0, zIndex: 50, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+      <div style={{ padding: "14px 10px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" }}><div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: ACCENT }}>The Archive</div><div onClick={() => onNav("search")} style={{ cursor: "pointer", padding: 2 }}><SearchIcon size={12} color={view === "search" ? ACCENT : TEXT_DIM} /></div></div>
+      <div onClick={() => onNav("library")} style={si(isLib && !activeDomain, 0)}><HomeIcon size={13} color={isLib ? ACCENT : TEXT_DIM} /> <span>Library {ct(lib._pro + lib._per)}</span></div>
+      <div onClick={() => onNav("recent")} style={si(view === "recent", 0)}><ClockIcon size={13} color={view === "recent" ? ACCENT : TEXT_DIM} /> <span>Recent</span></div>
+      <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Professional</div>
+      {tax.proDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 6)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
+      <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Personal</div>
+      {tax.perDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 6)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
+      <div style={{ borderTop: "1px solid " + SEPARATOR, margin: "10px 10px" }} />
+      <div onClick={() => onNav("learned")} style={si(isLrn && !activeDomain, 0)}><TrophyIcon size={13} color={isLrn ? ACCENT : TEXT_DIM} /> <span>Learned {ct(lrn._pro + lrn._per)}</span></div>
+      <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Professional</div>
+      {tax.proDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 6)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
+      <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Personal</div>
+      {tax.perDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 6)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   BOTTOM NAV
+   ═══════════════════════════════════════════════════════ */
+function BottomNav({ view, onNav, onQuickAdd, onFullAdd }) {
+  const bi = (active) => ({ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 0", color: active ? ACCENT : TEXT_DIM, fontSize: 10, fontWeight: 500, background: "none", border: "none", cursor: "pointer", flex: 1, fontFamily: "inherit" });
+  const BoltIcon = ({ size = 20, color = TEXT_DIM }) => <Svg size={size}><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke={color} fill="none"/></Svg>;
+  return (
+    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: BG, borderTop: "1px solid " + SEPARATOR, display: "flex", height: 56, zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+      <button style={bi(view === "library")} onClick={() => onNav("library")}><HomeIcon size={20} color={view === "library" ? ACCENT : TEXT_DIM} /><span>Library</span></button>
+      <button style={bi(view === "search")} onClick={() => onNav("search")}><SearchIcon size={20} color={view === "search" ? ACCENT : TEXT_DIM} /><span>Search</span></button>
+      <button style={bi(view === "quickadd")} onClick={onQuickAdd}><BoltIcon size={20} color={view === "quickadd" ? ACCENT : TEXT_DIM} /><span>Quick</span></button>
+      <button style={bi(view === "add")} onClick={onFullAdd}><PlusI size={20} color={view === "add" ? ACCENT : TEXT_DIM} /><span>Add</span></button>
+      <button style={bi(view === "starred")} onClick={() => onNav("starred")}><StarI size={20} color={view === "starred" ? ACCENT : TEXT_DIM} fill={view === "starred" ? ACCENT : "none"} /><span>Starred</span></button>
+      <button style={bi(view === "settings")} onClick={() => onNav("settings")}><SettingsIcon size={20} color={view === "settings" ? ACCENT : TEXT_DIM} /><span>Settings</span></button>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MAIN APP
+   ═══════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════
+   PRODUCTION APP — Firestore-backed
+   ═══════════════════════════════════════════════════════ */
+function TheArchiveProduction() {
+  const { items: firestoreItems, loaded, save: fsSave, saveBatch } = useFirestoreItems();
+  const { prefs, update: updatePrefs } = useFirestorePrefs();
+  
+  if (!loaded || !prefs) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e0e",color:"#777",fontSize:14 }}>Loading data...</div>;
+
+  return <TheArchiveInner 
+    initialItems={firestoreItems} 
+    fsSave={fsSave} 
+    fsSaveBatch={saveBatch}
+    initialPrefs={prefs}
+    updatePrefs={updatePrefs}
+  />;
+}
+
+function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, updatePrefs }) {
+  // Items come from Firestore via onSnapshot — we mirror them locally for instant UI
+  const [items, setItems] = useState(initialItems);
+  
+  // Sync when Firestore pushes updates (e.g. from another device)
+  useEffect(() => { setItems(initialItems); }, [initialItems]);
+
+  const [customTax, setCustomTax] = useState(initialPrefs.customTax);
+  const taxonomy = useMemo(() => buildTaxonomy(customTax), [customTax]);
+
+  const [view, setView] = useState("library");
+  const [activeDomain, setActiveDomain] = useState(null);
+  const [itemId, setItemId] = useState(null);
+  const [editItem, setEditItem] = useState(null);
+  const [addInit, setAddInit] = useState({});
+  const [prevView, setPrevView] = useState("library");
+
+  const [desktop, setDesktop] = useState(typeof window !== "undefined" ? window.innerWidth >= 768 : true);
+  const [lastExport, setLastExport] = useState(initialPrefs.lastExport);
+  const [streak, setStreak] = useState(() => resolveStreak(initialPrefs.streak));
+  const [catModal, setCatModal] = useState(null);
+  const [allTags, setAllTags] = useState(initialPrefs.allTags);
+
+  // Persist prefs to Firestore when they change
+  useEffect(() => { updatePrefs({ customTax }); }, [customTax]);
+  useEffect(() => { updatePrefs({ streak }); }, [streak]);
+  useEffect(() => { updatePrefs({ allTags }); }, [allTags]);
+  useEffect(() => { if (lastExport) updatePrefs({ lastExport }); }, [lastExport]);
+  useEffect(() => { const fn = () => setDesktop(window.innerWidth >= 768); window.addEventListener("resize", fn); return () => window.removeEventListener("resize", fn); }, []);
+
+  // Save individual item to Firestore
+  const persistItem = useCallback((item) => { fsSave(item); }, [fsSave]);
+
+  const nav = useCallback((v, a1, a2, a3, a4) => {
+    if (v === "library") { setView("library"); setActiveDomain(a1 || null); }
+    else if (v === "learned") { setView("learned"); setActiveDomain(a1 || null); }
+    else if (v === "starred") { setView("starred"); setActiveDomain(a1 || null); }
+    else if (v === "search") { setView("search"); setActiveDomain(null); }
+    else if (v === "recent") { setView("recent"); setActiveDomain(null); }
+    else if (v === "settings") { setView("settings"); setActiveDomain(null); }
+    else if (v === "detail") { setPrevView(view); setView("detail"); setItemId(a1); }
+    else if (v === "add") { setPrevView(view); setView("add"); setEditItem(null); setAddInit({ domain: a1 || "", cat: a2 || "", subcat: a3 || "" }); }
+    else if (v === "edit") { setView("edit"); setEditItem(a1); }
+  }, [view]);
+
+  const handleSave = (saved) => {
+    setItems(prev => { const idx = prev.findIndex(i => i.id === saved.id); if (idx >= 0) { const n = [...prev]; n[idx] = saved; return n; } return [...prev, saved]; });
+    persistItem(saved);
+    if (view === "edit") setView("detail");
+    else setView(prevView || "library");
+  };
+  const handleSynthesis = (id, text) => { 
+    const now = new Date().toISOString(); 
+    setItems(prev => prev.map(i => { 
+      if (i.id !== id) return i;
+      const updated = { ...i, synthesis: text, synthesisUpdatedAt: now, updatedAt: now };
+      persistItem(updated);
+      return updated;
+    })); 
+  };
+  const handleMarkLearned = (id) => {
+    const now = new Date().toISOString(); let transitioned = false;
+    setItems(prev => prev.map(i => { 
+      if (i.id !== id || i.state === STATES.LEARNED) return i; 
+      transitioned = true; 
+      const updated = { ...i, state: STATES.LEARNED, date_learned: now, updatedAt: now };
+      persistItem(updated);
+      return updated;
+    }));
+    if (transitioned) setStreak(prev => recordLearned(resolveStreak(prev)));
+  };
+  const handleDelete = (id) => { 
+    const now = new Date().toISOString(); 
+    setItems(prev => prev.map(i => { 
+      if (i.id !== id) return i;
+      const updated = { ...i, deleted: true, deletedAt: now, updatedAt: now };
+      persistItem(updated);
+      return updated;
+    })); 
+    setView(prevView || "library"); 
+  };
+  const handleExport = () => { const ts = doExport(items); setLastExport(ts); };
+  const handleImport = (newItems) => { 
+    setItems(prev => [...prev, ...newItems]); 
+    fsSaveBatch(newItems);
+  };
+  const handleBulkMove = (ids, target) => {
+    const now = new Date().toISOString();
+    const updated = [];
+    setItems(prev => prev.map(i => { 
+      if (!ids.includes(i.id)) return i;
+      const u = { ...i, ...target, updatedAt: now };
+      updated.push(u);
+      return u;
+    }));
+    fsSaveBatch(updated);
+    setView("library");
+  };
+  const toggleStar = id => {
+    setItems(prev => prev.map(i => { 
+      if (i.id !== id || i.state !== STATES.LEARNED) return i;
+      const updated = { ...i, starred: !i.starred, updatedAt: new Date().toISOString() };
+      persistItem(updated);
+      return updated;
+    }));
+  };
+  const activeItem = items.find(i => i.id === itemId);
+
+  const handleAddTax = (spec) => { setCatModal(spec); };
+  const handleConfirmAddTax = (name) => {
+    const entry = { id: genId(), ...catModal, name, createdAt: new Date().toISOString() };
+    setCustomTax(prev => [...prev, entry]);
+    setCatModal(null);
+  };
+  const handleRemoveTax = (id) => { setCustomTax(prev => prev.filter(c => c.id !== id)); };
+  const handleCreateTag = (tag) => { setAllTags(prev => prev.includes(tag) ? prev : [...prev, tag].sort()); };
+  const handleRemoveTag = (tag) => { setAllTags(prev => prev.filter(t => t !== tag)); };
+
+  const [renameModal, setRenameModal] = useState(null);
+  const handleRenameTax = (spec) => { setRenameModal(spec); };
+  const handleConfirmRename = (newName) => {
+    const { level: lv, oldName, domain: rDomain, category: rCat } = renameModal;
+    const now = new Date().toISOString();
+    if (lv === "domain") {
+      setCustomTax(prev => {
+        let updated = prev.map(c => {
+          if (c.type === "domain" && c.name === oldName) return { ...c, name: newName };
+          if (c.domain === oldName) return { ...c, domain: newName };
+          return c;
+        });
+        const isDefault = DEFAULT_DOMAINS.some(d => d.name === oldName);
+        if (isDefault) updated = [...updated, { id: genId(), type: "rename_domain", from: oldName, to: newName, createdAt: now }];
+        return updated;
+      });
+      const toUpdate = items.filter(i => i.level_2 === oldName).map(i => ({ ...i, level_2: newName, updatedAt: now }));
+      setItems(prev => prev.map(i => i.level_2 === oldName ? { ...i, level_2: newName, updatedAt: now } : i));
+      if (toUpdate.length > 0) fsSaveBatch(toUpdate);
+    } else if (lv === "category") {
+      setCustomTax(prev => {
+        let updated = prev.map(c => {
+          if (c.type === "category" && c.domain === rDomain && c.name === oldName) return { ...c, name: newName };
+          if (c.type === "subcategory" && c.domain === rDomain && c.category === oldName) return { ...c, category: newName };
+          return c;
+        });
+        const dDef = DEFAULT_DOMAINS.find(d => d.name === rDomain);
+        const isDefault = dDef && dDef.categories.hasOwnProperty(oldName);
+        if (isDefault) updated = [...updated, { id: genId(), type: "rename_category", domain: rDomain, from: oldName, to: newName, createdAt: now }];
+        return updated;
+      });
+      const toUpdate = items.filter(i => i.level_2 === rDomain && i.level_3 === oldName).map(i => ({ ...i, level_3: newName, updatedAt: now }));
+      setItems(prev => prev.map(i => i.level_2 === rDomain && i.level_3 === oldName ? { ...i, level_3: newName, updatedAt: now } : i));
+      if (toUpdate.length > 0) fsSaveBatch(toUpdate);
+    } else if (lv === "subcategory") {
+      setCustomTax(prev => {
+        let updated = prev.map(c => {
+          if (c.type === "subcategory" && c.domain === rDomain && c.category === rCat && c.name === oldName) return { ...c, name: newName };
+          return c;
+        });
+        const dDef = DEFAULT_DOMAINS.find(d => d.name === rDomain);
+        const isDefault = dDef && dDef.categories[rCat] && dDef.categories[rCat].includes(oldName);
+        if (isDefault) updated = [...updated, { id: genId(), type: "rename_subcategory", domain: rDomain, category: rCat, from: oldName, to: newName, createdAt: now }];
+        return updated;
+      });
+      const toUpdate = items.filter(i => i.level_2 === rDomain && i.level_3 === rCat && i.level_4 === oldName).map(i => ({ ...i, level_4: newName, updatedAt: now }));
+      setItems(prev => prev.map(i => i.level_2 === rDomain && i.level_3 === rCat && i.level_4 === oldName ? { ...i, level_4: newName, updatedAt: now } : i));
+      if (toUpdate.length > 0) fsSaveBatch(toUpdate);
+    }
+    setRenameModal(null);
+  };
+
+  const goBackDetail = () => { setView(prevView || "library"); };
+
+  const isDeep = view === "detail" || view === "edit" || view === "add" || view === "quickadd" || view === "bulkmove";
+  const showSidebar = !isDeep;
+  const showMobileSidebar = !desktop && showSidebar;
+  const sidebarWidth = 220;
+  const mobileSidebarWidth = 140;
+
+  const content = () => {
+    const compact = showMobileSidebar;
+    switch (view) {
+      case "library": return <DrillView key="lib" items={items} onNav={nav} onAddTax={handleAddTax} onRenameTax={handleRenameTax} isLearned={false} compact={compact} initDomain={activeDomain} />;
+      case "learned": return <DrillView key="lrn" items={items} onNav={nav} onAddTax={handleAddTax} onRenameTax={handleRenameTax} isLearned={true} compact={compact} streak={streak} initDomain={activeDomain} />;
+      case "search": return <SearchView items={items} onNav={nav} />;
+      case "recent": return <RecentView items={items} onNav={nav} />;
+      case "settings": return <SettingsView items={items} onExport={handleExport} onImport={handleImport} onBulkMove={() => setView("bulkmove")} lastExport={lastExport} streak={streak} customTax={customTax} onRemoveCategory={handleRemoveTax} allTags={allTags} onRemoveTag={handleRemoveTag} />;
+      case "starred": return <DrillView key="star" items={items} onNav={nav} onAddTax={handleAddTax} onRenameTax={handleRenameTax} isStarred={true} compact={compact} initDomain={activeDomain} />;
+      case "bulkmove": return <BulkMoveView items={items} onMove={handleBulkMove} onBack={() => setView("settings")} />;
+      case "detail": return activeItem ? <ItemDetail item={activeItem} onBack={goBackDetail} onEdit={() => nav("edit", activeItem)} onDelete={handleDelete} onToggleStar={() => toggleStar(activeItem.id)} onSynthesisChange={handleSynthesis} onMarkLearned={handleMarkLearned} /> : null;
+      case "quickadd": return <QuickAdd onSave={handleSave} onCancel={() => setView(prevView || "library")} />;
+      case "add": return <AddEditPage initDomain={addInit.domain} initCat={addInit.cat} initSub={addInit.subcat} onSave={handleSave} onCancel={() => setView(prevView || "library")} allTags={allTags} onCreateTag={handleCreateTag} />;
+      case "edit": return editItem ? <AddEditPage item={editItem} onSave={handleSave} onCancel={() => setView("detail")} allTags={allTags} onCreateTag={handleCreateTag} /> : null;
+      default: return null;
+    }
+  };
+
+  const modalLabel = catModal ? (catModal.type === "domain" ? `New ${catModal.group} domain` : catModal.type === "category" ? `New category in ${catModal.domain}` : `New subcategory in ${catModal.category}`) : "";
+
+  return (
+    <TaxonomyContext.Provider value={taxonomy}>
+      {catModal && <AddCategoryModal label={modalLabel} onAdd={handleConfirmAddTax} onCancel={() => setCatModal(null)} />}
+      {renameModal && <RenameModal label={renameModal.level === "domain" ? "Rename domain" : renameModal.level === "category" ? "Rename category" : "Rename subcategory"} currentName={renameModal.oldName} onRename={handleConfirmRename} onCancel={() => setRenameModal(null)} />}
+      {desktop ? (
+        <div style={{ fontFamily: "'Inter',-apple-system,BlinkMacSystemFont,sans-serif", background: BG, color: TEXT, minHeight: "100vh", display: "flex", WebkitFontSmoothing: "antialiased" }}>
+          {showSidebar && <Sidebar view={view} activeDomain={activeDomain} onNav={nav} items={items} />}
+          <div style={{ marginLeft: showSidebar ? sidebarWidth : 0, flex: 1, padding: "24px 48px", minHeight: "100vh", overflowY: "auto", transition: "margin-left 0.15s ease" }}>{content()}</div>
+          {!showSidebar && <BottomNav view={view} onNav={nav} onQuickAdd={() => { setPrevView(view); setView("quickadd"); }} onFullAdd={() => nav("add")} />}
+        </div>
+      ) : (
+        <div style={{ fontFamily: "'Inter',-apple-system,BlinkMacSystemFont,sans-serif", background: BG, color: TEXT, minHeight: "100vh", display: "flex", flexDirection: "column", WebkitFontSmoothing: "antialiased" }}>
+          <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+            {showMobileSidebar && <MobileSidebar view={view} activeDomain={activeDomain} onNav={nav} items={items} />}
+            <div style={{ flex: 1, padding: showMobileSidebar ? "12px 16px" : "12px 20px", paddingBottom: 72, overflowY: "auto", marginLeft: showMobileSidebar ? mobileSidebarWidth : 0, transition: "margin-left 0.15s ease, padding 0.15s ease" }}>{content()}</div>
+          </div>
+          <BottomNav view={view} onNav={nav} onQuickAdd={() => { setPrevView(view); setView("quickadd"); }} onFullAdd={() => nav("add")} />
+        </div>
+      )}
+    </TaxonomyContext.Provider>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   RENDER
+   ═══════════════════════════════════════════════════════ */
+function App() {
+  return (
+    <AuthGate>
+      <TheArchiveProduction />
+    </AuthGate>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
