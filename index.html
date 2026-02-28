@@ -27,8 +27,8 @@ input, select, textarea, button { font-family: inherit; }
 <div id="root"></div>
 <script type="text/babel">
 const APP_NAME = "the-archive";
-const APP_VERSION = "V1";
-const BUILD_DATE = "2026-02-17";
+const APP_VERSION = "V2";
+const BUILD_DATE = "2026-02-28";
 const SCHEMA_VERSION = 2;
 
 const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } = React;
@@ -163,7 +163,7 @@ const SEPARATOR = "#1a1a1a";
 /* ═══════════════════════════════════════════════════════
    CONSTANTS & DATA MODEL
    ═══════════════════════════════════════════════════════ */
-const STATES = { WANT: "Want to Learn", LIBRARY: "Library", LEARNED: "Learned" };
+const STATES = { WANT: "Want to Learn", LIBRARY: "Library", LEARNED: "Learned", VAULT: "Vault" };
 const TYPES = ["Article", "Tweet", "Video", "Chart"];
 
 /*  Unified default domains — every domain is a peer.
@@ -314,7 +314,7 @@ function useNavCounts(items, mode) {
   const tax = useTaxonomy();
   return useMemo(() => {
     const active = items.filter(i => !i.deleted);
-    const f = mode === "starred" ? active.filter(i => i.starred && i.state === STATES.LEARNED) : mode === "learned" ? active.filter(i => i.state === STATES.LEARNED) : active.filter(i => i.state !== STATES.LEARNED);
+    const f = mode === "vault" ? active.filter(i => i.state === STATES.VAULT) : mode === "learned" ? active.filter(i => i.state === STATES.LEARNED) : active.filter(i => i.state !== STATES.LEARNED && i.state !== STATES.VAULT);
     const c = {};
     let pro = 0, per = 0;
     tax.proDomains.forEach(d => { const n = f.filter(i => i.level_2 === d.name).length; c[d.name] = n; pro += n; });
@@ -413,8 +413,8 @@ function ImageModal({ src, onClose }) {
 /* ═══════════════════════════════════════════════════════
    SMALL COMPONENTS
    ═══════════════════════════════════════════════════════ */
-const Badge = ({ state }) => <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 3, background: state === STATES.LEARNED ? ACCENT_SUBTLE : "rgba(255,255,255,0.04)", color: state === STATES.LEARNED ? ACCENT : TEXT_DIM }}>{state}</span>;
-function Star({ starred, enabled, onToggle }) { if (!enabled) return <StarI size={16} color={TEXT_MUTED} />; return <button onClick={e => { e.stopPropagation(); onToggle(); }} style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex" }}><StarI size={16} color={ACCENT} fill={starred ? ACCENT : "none"} /></button>; }
+const Badge = ({ state }) => <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 3, background: state === STATES.VAULT ? "rgba(139,105,20,0.15)" : state === STATES.LEARNED ? ACCENT_SUBTLE : "rgba(255,255,255,0.04)", color: state === STATES.VAULT ? "#D4A017" : state === STATES.LEARNED ? ACCENT : TEXT_DIM }}>{state}</span>;
+
 function ConfirmModal({ message, confirmLabel, onConfirm, onCancel }) { return (<div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}><div style={{ background: "#1a1a1a", border: `1px solid ${BORDER}`, borderRadius: 10, padding: 24, maxWidth: 340, width: "100%" }}><div style={{ fontSize: 14, color: TEXT, lineHeight: 1.5, marginBottom: 20 }}>{message}</div><div style={{ display: "flex", gap: 10 }}><button onClick={onConfirm} style={{ flex: 1, padding: "11px 0", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: "#c44", color: "#fff", cursor: "pointer" }}>{confirmLabel || "Delete"}</button><button onClick={onCancel} style={{ flex: 1, padding: "11px 0", fontSize: 13, fontWeight: 500, fontFamily: "inherit", borderRadius: 5, border: `1px solid ${BORDER}`, background: "transparent", color: TEXT_DIM, cursor: "pointer" }}>Cancel</button></div></div></div>); }
 function ListRow({ title, meta, right, onClick, noBorder, compact }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: compact ? "11px 0" : "14px 0", borderBottom: noBorder ? "none" : `1px solid ${SEPARATOR}`, cursor: onClick ? "pointer" : "default", gap: 10 }}><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: compact ? 12.5 : 14, fontWeight: 500, color: TEXT, lineHeight: 1.4 }}>{title}</div>{meta && <div style={{ fontSize: compact ? 10.5 : 12, color: TEXT_MUTED, marginTop: 2, opacity: compact ? 0.7 : 1 }}>{meta}</div>}</div><div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>{right}{onClick && <ChevR size={compact ? 12 : 14} color={TEXT_MUTED} />}</div></div>); }
 function PageHeader({ title, subtitle, backLabel, onBack, onAdd, onEdit, compact }) { return (<div style={{ marginBottom: compact ? 4 : 8 }}>{onBack && <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: TEXT_DIM, fontSize: compact ? 11.5 : 13, fontFamily: "inherit", padding: compact ? "8px 0 2px 0" : "12px 0 4px 0" }}><ChevL size={compact ? 12 : 14} color={TEXT_DIM} /> {backLabel || "Back"}</button>}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: `${onBack ? (compact ? "6px" : "8px") : (compact ? "16px" : "24px")} 0 ${compact ? "10px" : "16px"}`, gap: 12 }}><div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}><div><h1 style={{ fontSize: compact ? 22 : 28, fontWeight: 700, letterSpacing: "-0.03em", color: TEXT, margin: 0, lineHeight: 1.1 }}>{title}</h1>{subtitle && <div style={{ fontSize: compact ? 11 : 13, color: TEXT_MUTED, marginTop: compact ? 4 : 6, opacity: compact ? 0.7 : 1 }}>{subtitle}</div>}</div>{onEdit && <button onClick={onEdit} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, marginTop: 2, flexShrink: 0 }}><EditI size={14} color={TEXT_MUTED} /></button>}</div>{onAdd && <button onClick={onAdd} style={{ display: "flex", alignItems: "center", gap: 4, padding: compact ? "6px 12px" : "8px 16px", borderRadius: 5, border: `1px solid ${ACCENT_DIM}`, background: "transparent", color: ACCENT, fontSize: compact ? 11 : 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, marginTop: 2 }}><PlusI size={compact ? 10 : 12} color={ACCENT} /> Add</button>}</div></div>); }
@@ -499,7 +499,7 @@ function QuickAdd({ onSave, onCancel }) {
     const domObj = domain ? tax.domainMap[domain] : null;
     const group = domObj ? domObj.group : "Professional";
     const now = new Date().toISOString();
-    onSave({ id: genId(), ownerId: "local", createdAt: now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type: "Article", title: url.trim(), content: url.trim(), image_url: "", source: "", tags: [], countries: [], level_1: group, level_2: domain || "", level_3: null, level_4: null, state: STATES.LIBRARY, core_takeaway: "", date_added: now, date_learned: null, starred: false, synthesis: "", synthesisUpdatedAt: null, deleted: false, deletedAt: null });
+    onSave({ id: genId(), ownerId: "local", createdAt: now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type: "Article", title: url.trim(), content: url.trim(), image_url: "", source: "", tags: [], countries: [], level_1: group, level_2: domain || "", level_3: null, level_4: null, state: STATES.LIBRARY, core_takeaway: "", date_added: now, date_learned: null, synthesis: "", synthesisUpdatedAt: null, deleted: false, deletedAt: null });
   };
   return (
     <div style={{ maxWidth: 640, padding: "0 0 60px" }}>
@@ -564,13 +564,14 @@ function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, all
     if (needsCountries && countries.length === 0) { setCountryErr("At least one country is required."); return; }
     setCountryErr("");
     let state;
-    if (isEdit && item.state === STATES.LEARNED) state = STATES.LEARNED;
+    if (isEdit && item.state === STATES.VAULT) state = STATES.VAULT;
+    else if (isEdit && item.state === STATES.LEARNED) state = STATES.LEARNED;
     else if (title.trim() && domain) state = STATES.LIBRARY;
     else state = STATES.WANT;
     const wasL = item?.state === STATES.LEARNED;
     const trans = state === STATES.LEARNED && !wasL;
     const now = new Date().toISOString();
-    onSave({ id: item?.id || genId(), ownerId: item?.ownerId || "local", createdAt: item?.createdAt || now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type, title: title.trim(), content, image_url: type === "Chart" ? image_url : "", source, tags, countries: needsCountries ? countries : (item?.countries || []), level_1: group, level_2: domain, level_3: cat || null, level_4: subcat || null, state, core_takeaway: item?.core_takeaway || "", date_added: item?.date_added || now, date_learned: trans ? now : (item?.date_learned || null), starred: item?.starred || false, synthesis: item?.synthesis || "", synthesisUpdatedAt: item?.synthesisUpdatedAt || null, deleted: false, deletedAt: null });
+    onSave({ id: item?.id || genId(), ownerId: item?.ownerId || "local", createdAt: item?.createdAt || now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type, title: title.trim(), content, image_url: type === "Chart" ? image_url : "", source, tags, countries: needsCountries ? countries : (item?.countries || []), level_1: group, level_2: domain, level_3: cat || null, level_4: subcat || null, state, core_takeaway: item?.core_takeaway || "", date_added: item?.date_added || now, date_learned: trans ? now : (item?.date_learned || null),  synthesis: item?.synthesis || "", synthesisUpdatedAt: item?.synthesisUpdatedAt || null, deleted: false, deletedAt: null });
   };
   const lbl = { fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 8, display: "block" };
   const inp = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "11px 13px", color: TEXT, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
@@ -598,15 +599,18 @@ function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, all
 /* ═══════════════════════════════════════════════════════
    ITEM DETAIL
    ═══════════════════════════════════════════════════════ */
-function ItemDetail({ item, onBack, onEdit, onDelete, onToggleStar, onSynthesisChange, onMarkLearned }) {
+function ItemDetail({ item, onBack, onEdit, onDelete, onMoveVault, onMoveLearned, onSynthesisChange, onMarkLearned }) {
   const [showImg, setShowImg] = useState(false); const [synthText, setSynthText] = useState(item.synthesis || ""); const [editing, setEditing] = useState(false); const [error, setError] = useState(""); const [showDeleteConfirm, setShowDeleteConfirm] = useState(false); const synthTimer = useRef(null);
   const bp = [item.level_2, item.level_3, item.level_4].filter(Boolean).join(" \u2192 ");
   const isLearned = item.state === STATES.LEARNED;
+  const isVault = item.state === STATES.VAULT;
+  const isLibrary = item.state === STATES.LIBRARY || item.state === STATES.WANT;
   useEffect(() => { setSynthText(item.synthesis || ""); setEditing(false); setError(""); }, [item.id, item.synthesis]);
   const handleDraftChange = (val) => { setSynthText(val); setError(""); if (synthTimer.current) clearTimeout(synthTimer.current); synthTimer.current = setTimeout(() => { onSynthesisChange(item.id, val); }, 800); };
   const handleSubmit = () => { if (!synthText.trim()) { setError("Synthesis cannot be empty."); return; } onSynthesisChange(item.id, synthText.trim()); onMarkLearned(item.id); setEditing(false); setError(""); };
   const handleSaveEdit = () => { if (!synthText.trim()) { setError("Synthesis cannot be empty."); return; } onSynthesisChange(item.id, synthText.trim()); setEditing(false); setError(""); };
   const btnS = (p) => ({ padding: "10px 20px", fontSize: 12, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, cursor: "pointer", border: p ? "none" : `1px solid ${BORDER}`, background: p ? ACCENT : "transparent", color: p ? "#111" : TEXT_DIM, marginTop: 10 });
+  const vaultBtnS = { padding: "10px 20px", fontSize: 12, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, cursor: "pointer", border: "none", background: "#8B6914", color: "#fff", marginTop: 10 };
   const taS = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "12px 13px", color: TEXT, fontSize: 13, lineHeight: 1.6, outline: "none", boxSizing: "border-box", fontFamily: "inherit", minHeight: 100, resize: "vertical" };
   return (
     <div style={{ maxWidth: 640, paddingBottom: 60 }}>
@@ -620,7 +624,7 @@ function ItemDetail({ item, onBack, onEdit, onDelete, onToggleStar, onSynthesisC
         </div>
       </div>
       {item.type === "Chart" && item.image_url && <div onClick={() => setShowImg(true)} style={{ cursor: "pointer", margin: "8px 0 20px", borderRadius: 6, overflow: "hidden", background: "#080808" }}><img src={item.image_url} alt={item.title} style={{ width: "100%", display: "block", maxHeight: 400, objectFit: "contain" }} /></div>}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}><Badge state={item.state} /><span style={{ fontSize: 11, color: TEXT_DIM }}>{item.type}</span><span style={{ color: TEXT_MUTED, fontSize: 11 }}>&middot;</span><span style={{ fontSize: 11, color: TEXT_DIM }}>{bp}</span><div style={{ marginLeft: "auto" }}><Star starred={item.starred} enabled={isLearned} onToggle={onToggleStar} /></div></div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}><Badge state={item.state} /><span style={{ fontSize: 11, color: TEXT_DIM }}>{item.type}</span><span style={{ color: TEXT_MUTED, fontSize: 11 }}>&middot;</span><span style={{ fontSize: 11, color: TEXT_DIM }}>{bp}</span></div>
       <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em", margin: "0 0 14px", lineHeight: 1.3, color: TEXT }}>{item.title}</h1>
       {item.source && <div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 10 }}>{item.source}</div>}
       {item.countries?.length > 0 && <div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 10 }}>Countries: {item.countries.join(", ")}</div>}
@@ -628,9 +632,11 @@ function ItemDetail({ item, onBack, onEdit, onDelete, onToggleStar, onSynthesisC
       {item.content?.trim() && (() => { const isMobile = typeof navigator !== "undefined" && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent); const lp = isMobile ? {} : { target: "_blank", rel: "noopener noreferrer" }; return <a href={item.content} {...lp} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: ACCENT, textDecoration: "none", marginBottom: 14 }}><Svg size={12}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke={ACCENT} /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke={ACCENT} /></Svg>Link</a>; })()}
       <div style={{ borderTop: `1px solid ${SEPARATOR}`, marginTop: 16, paddingTop: 16 }}>
         <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 10 }}>Synthesis</div>
-        {!isLearned && (<><textarea value={synthText} onChange={e => handleDraftChange(e.target.value)} style={taS} />{item.synthesisUpdatedAt && <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 6 }}>Draft saved</div>}{error && <div style={{ fontSize: 11, color: "#c44", marginTop: 8 }}>{error}</div>}<button onClick={handleSubmit} style={btnS(true)}>Submit &amp; mark as learned</button></>)}
-        {isLearned && !editing && (<>{synthText ? <div style={{ fontSize: 13, lineHeight: 1.65, color: TEXT, whiteSpace: "pre-wrap" }}>{synthText}</div> : <div style={{ fontSize: 12, color: TEXT_MUTED }}>No synthesis written.</div>}<button onClick={() => setEditing(true)} style={btnS(false)}>Edit Synthesis</button></>)}
+        {isLibrary && (<><textarea value={synthText} onChange={e => handleDraftChange(e.target.value)} style={taS} />{item.synthesisUpdatedAt && <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 6 }}>Draft saved</div>}{error && <div style={{ fontSize: 11, color: "#c44", marginTop: 8 }}>{error}</div>}<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button onClick={handleSubmit} style={btnS(true)}>Submit &amp; mark as learned</button><button onClick={onMoveVault} style={vaultBtnS}>Move to Vault</button></div></>)}
+        {isLearned && !editing && (<>{synthText ? <div style={{ fontSize: 13, lineHeight: 1.65, color: TEXT, whiteSpace: "pre-wrap" }}>{synthText}</div> : <div style={{ fontSize: 12, color: TEXT_MUTED }}>No synthesis written.</div>}<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button onClick={() => setEditing(true)} style={btnS(false)}>Edit Synthesis</button><button onClick={onMoveVault} style={vaultBtnS}>Move to Vault</button></div></>)}
         {isLearned && editing && (<><textarea value={synthText} onChange={e => { setSynthText(e.target.value); setError(""); }} style={taS} />{error && <div style={{ fontSize: 11, color: "#c44", marginTop: 8 }}>{error}</div>}<div style={{ display: "flex", gap: 8, marginTop: 10 }}><button onClick={handleSaveEdit} style={btnS(true)}>Save Changes</button><button onClick={() => { setEditing(false); setSynthText(item.synthesis || ""); setError(""); }} style={btnS(false)}>Cancel</button></div></>)}
+        {isVault && !editing && (<>{synthText ? <div style={{ fontSize: 13, lineHeight: 1.65, color: TEXT, whiteSpace: "pre-wrap" }}>{synthText}</div> : <div style={{ fontSize: 12, color: TEXT_MUTED }}>No synthesis written.</div>}<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button onClick={() => setEditing(true)} style={btnS(false)}>Edit Synthesis</button><button onClick={onMoveLearned} style={btnS(false)}>Move to Learned</button></div></>)}
+        {isVault && editing && (<><textarea value={synthText} onChange={e => { setSynthText(e.target.value); setError(""); }} style={taS} />{error && <div style={{ fontSize: 11, color: "#c44", marginTop: 8 }}>{error}</div>}<div style={{ display: "flex", gap: 8, marginTop: 10 }}><button onClick={handleSaveEdit} style={btnS(true)}>Save Changes</button><button onClick={() => { setEditing(false); setSynthText(item.synthesis || ""); setError(""); }} style={btnS(false)}>Cancel</button></div></>)}
       </div>
     </div>
   );
@@ -641,7 +647,7 @@ function ItemDetail({ item, onBack, onEdit, onDelete, onToggleStar, onSynthesisC
    Handles Domain→Category→Subcategory→Types→Items
    Used by both Library and Learned views
    ═══════════════════════════════════════════════════════ */
-function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isStarred, compact, streak, initDomain }) {
+function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isVault, compact, streak, initDomain }) {
   const tax = useTaxonomy();
   const [level, setLevel] = useState(() => initDomain ? "domain" : "root");
   const [domain, setDomain] = useState(initDomain || null);
@@ -652,7 +658,7 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isStarred, 
   const [flatSort, setFlatSort] = useState(null);
   const toggleSort = (key) => setFlatSort(prev => prev === key ? null : key);
   const internalNav = useRef(false);
-  const viewKey = isStarred ? "starred" : isLearned ? "learned" : "library";
+  const viewKey = isVault ? "vault" : isLearned ? "learned" : "library";
 
   // Sync when sidebar changes initDomain (but not when we drove it)
   useEffect(() => {
@@ -662,7 +668,7 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isStarred, 
   }, [initDomain]);
 
   const active = items.filter(i => !i.deleted);
-  const pool = isStarred ? active.filter(i => i.starred && i.state === STATES.LEARNED) : isLearned ? active.filter(i => i.state === STATES.LEARNED) : active.filter(i => i.state !== STATES.LEARNED);
+  const pool = isVault ? active.filter(i => i.state === STATES.VAULT) : isLearned ? active.filter(i => i.state === STATES.LEARNED) : active.filter(i => i.state !== STATES.LEARNED && i.state !== STATES.VAULT);
 
   const go = (lv, d, c, s, t) => {
     internalNav.current = true;
@@ -679,8 +685,8 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isStarred, 
     const proCount = pool.filter(i => i.level_1 === "Professional").length;
     const perCount = pool.filter(i => i.level_1 === "Personal").length;
     const streakText = streak && streak.current > 0 ? streak.current + " day" + (streak.current !== 1 ? "s" : "") : null;
-    const readOnly = isLearned || isStarred;
-    const rootTitle = isStarred ? "Starred" : isLearned ? "Learned" : null;
+    const readOnly = isLearned || isVault;
+    const rootTitle = isVault ? "Vault" : isLearned ? "Learned" : null;
     return (<div>
       {rootTitle && <PageHeader title={rootTitle} subtitle={`${pool.length} items`} />}
       {isLearned && streakText && <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16, marginTop: -8 }}><FireIcon size={16} /><span style={{ fontSize: 13, fontWeight: 600, color: "#e8590c" }}>{streakText}</span><span style={{ fontSize: 12, color: TEXT_DIM }}>streak</span></div>}
@@ -706,11 +712,11 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isStarred, 
     const showCountry = COUNTRY_DOMAINS.includes(domain);
     if (catKeys.length > 0) {
       return (<div>
-        <PageHeader title={domain} subtitle={`${domainItems.length} items`} backLabel={isStarred ? "Starred" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain)} compact={compact} />
+        <PageHeader title={domain} subtitle={`${domainItems.length} items`} backLabel={isVault ? "Vault" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain)} compact={compact} />
         {catKeys.map((k, idx) => { const n = domainItems.filter(i => i.level_3 === k).length; return <ListRow key={k} title={k} meta={`${n} items`} onClick={() => go("category", domain, k)} noBorder={idx === catKeys.length - 1} compact={compact} />; })}
         {/* Items with no category */}
         {(() => { const unc = domainItems.filter(i => !i.level_3).length; return unc > 0 ? <ListRow title="Uncategorized" meta={`${unc} items`} onClick={() => go("types", domain, "__none__")} /> : null; })()}
-        {!(isLearned || isStarred) && <AddBtn label="Add category" onClick={() => onAddTax({ type: "category", domain })} />}
+        {!(isLearned || isVault) && <AddBtn label="Add category" onClick={() => onAddTax({ type: "category", domain })} />}
       </div>);
     }
     // No categories — show type rows directly
@@ -718,10 +724,10 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isStarred, 
     const flatMode = showCountry && !!countryFilter && domain === "Geopolitics";
     if (flatMode) {
       const sorted = sortItems(cfItems, flatSort || "added");
-      return (<div><PageHeader title={domain} subtitle={`${cfItems.length} items`} backLabel={isStarred ? "Starred" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain)} compact={compact} /><CountryFilter items={domainItems} value={countryFilter} onChange={setCountryFilter} /><div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 14 }}>{countryFilter} &bull; {sorted.length} items</div><SortBar mode={flatSort || "added"} onChange={toggleSort} />{sorted.map((it, idx) => <ListRow key={it.id} title={`${it.title} \u2014 ${it.type}`} onClick={() => onNav("detail", it.id)} noBorder={idx === sorted.length - 1} compact={compact} />)}</div>);
+      return (<div><PageHeader title={domain} subtitle={`${cfItems.length} items`} backLabel={isVault ? "Vault" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain)} compact={compact} /><CountryFilter items={domainItems} value={countryFilter} onChange={setCountryFilter} /><div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 14 }}>{countryFilter} &bull; {sorted.length} items</div><SortBar mode={flatSort || "added"} onChange={toggleSort} />{sorted.map((it, idx) => <ListRow key={it.id} title={`${it.title} \u2014 ${it.type}`} onClick={() => onNav("detail", it.id)} noBorder={idx === sorted.length - 1} compact={compact} />)}</div>);
     }
     const typeRows = TYPES.map(t => ({ type: t, count: cfItems.filter(i => i.type === t).length }));
-    return (<div><PageHeader title={domain} subtitle={`${cfItems.length} items`} backLabel={isStarred ? "Starred" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain)} compact={compact} />{showCountry && <CountryFilter items={domainItems} value={countryFilter} onChange={setCountryFilter} />}<TypeRowsOrFlat items={cfItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, null, null, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} addBtn={!isLearned ? <AddBtn label="Add category" onClick={() => onAddTax({ type: "category", domain })} /> : null} /></div>);
+    return (<div><PageHeader title={domain} subtitle={`${cfItems.length} items`} backLabel={isVault ? "Vault" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain)} compact={compact} />{showCountry && <CountryFilter items={domainItems} value={countryFilter} onChange={setCountryFilter} />}<TypeRowsOrFlat items={cfItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, null, null, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} addBtn={!isLearned ? <AddBtn label="Add category" onClick={() => onAddTax({ type: "category", domain })} /> : null} /></div>);
   }
 
   // CATEGORY — show subcategories (or type rows if none)
@@ -731,20 +737,20 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isStarred, 
     const catItems = pool.filter(i => i.level_2 === domain && i.level_3 === cat);
     if (subcats.length > 0) {
       return (<div>
-        <PageHeader title={cat} subtitle={`${catItems.length} items`} backLabel={domain} onBack={() => go("domain", domain)} onEdit={() => onRenameTax({ level: "category", oldName: cat, domain })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain, cat)} compact={compact} />
+        <PageHeader title={cat} subtitle={`${catItems.length} items`} backLabel={domain} onBack={() => go("domain", domain)} onEdit={() => onRenameTax({ level: "category", oldName: cat, domain })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain, cat)} compact={compact} />
         {subcats.map((s, idx) => { const n = catItems.filter(i => i.level_4 === s).length; return <ListRow key={s} title={s} meta={`${n} items`} onClick={() => go("subcategory", domain, cat, s)} noBorder={idx === subcats.length - 1} compact={compact} />; })}
         {(() => { const unc = catItems.filter(i => !i.level_4).length; return unc > 0 ? <ListRow title="Uncategorized" meta={`${unc} items`} onClick={() => go("types", domain, cat, "__none__")} /> : null; })()}
-        {!(isLearned || isStarred) && <AddBtn label="Add subcategory" onClick={() => onAddTax({ type: "subcategory", domain, category: cat })} />}
+        {!(isLearned || isVault) && <AddBtn label="Add subcategory" onClick={() => onAddTax({ type: "subcategory", domain, category: cat })} />}
       </div>);
     }
     const typeRows = TYPES.map(t => ({ type: t, count: catItems.filter(i => i.type === t).length }));
-    return (<div><PageHeader title={cat} subtitle={`${catItems.length} items`} backLabel={domain} onBack={() => go("domain", domain)} onEdit={() => onRenameTax({ level: "category", oldName: cat, domain })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain, cat)} compact={compact} /><TypeRowsOrFlat items={catItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, cat, null, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} addBtn={!isLearned ? <AddBtn label="Add subcategory" onClick={() => onAddTax({ type: "subcategory", domain, category: cat })} /> : null} /></div>);
+    return (<div><PageHeader title={cat} subtitle={`${catItems.length} items`} backLabel={domain} onBack={() => go("domain", domain)} onEdit={() => onRenameTax({ level: "category", oldName: cat, domain })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain, cat)} compact={compact} /><TypeRowsOrFlat items={catItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, cat, null, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} addBtn={!isLearned ? <AddBtn label="Add subcategory" onClick={() => onAddTax({ type: "subcategory", domain, category: cat })} /> : null} /></div>);
   }
 
   // SUBCATEGORY — type rows
   if (level === "subcategory") {
     const scItems = pool.filter(i => i.level_2 === domain && i.level_3 === cat && i.level_4 === subcat);
-    return (<div><PageHeader title={subcat} subtitle={`${scItems.length} items`} backLabel={cat} onBack={() => go("category", domain, cat)} onEdit={() => onRenameTax({ level: "subcategory", oldName: subcat, domain, category: cat })} onAdd={(isLearned || isStarred) ? undefined : () => onNav("add", domain, cat, subcat)} compact={compact} /><TypeRowsOrFlat items={scItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, cat, subcat, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} /></div>);
+    return (<div><PageHeader title={subcat} subtitle={`${scItems.length} items`} backLabel={cat} onBack={() => go("category", domain, cat)} onEdit={() => onRenameTax({ level: "subcategory", oldName: subcat, domain, category: cat })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain, cat, subcat)} compact={compact} /><TypeRowsOrFlat items={scItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, cat, subcat, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} /></div>);
   }
 
   // TYPES — item list filtered by type
@@ -762,7 +768,7 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isStarred, 
     if (contentType === "Chart") {
       return (<div><PageHeader title="Charts" subtitle={`${fl.length} items`} backLabel={backLabel} onBack={() => go(backLevel, domain, cat, subcat)} /><SortBar mode={typeSortKey} onChange={toggleSort} />{fl.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No charts yet</div>}<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{sorted.map(it => (<div key={it.id} onClick={() => onNav("detail", it.id)} style={{ cursor: "pointer" }}>{it.image_url ? <div style={{ borderRadius: 5, overflow: "hidden", background: "#080808", aspectRatio: "4/3" }}><img src={it.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /></div> : <div style={{ borderRadius: 5, background: "#141414", aspectRatio: "4/3", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: 11, color: TEXT_MUTED }}>No image</span></div>}<div style={{ fontSize: 12, fontWeight: 500, color: TEXT, marginTop: 6, lineHeight: 1.3 }}>{it.title}</div><div style={{ fontSize: 10, color: TEXT_DIM, marginTop: 2 }}><Badge state={it.state} /></div></div>))}</div></div>);
     }
-    return (<div><PageHeader title={(contentType || "All") + "s"} subtitle={`${fl.length} items`} backLabel={backLabel} onBack={() => go(backLevel, domain, cat, subcat)} /><SortBar mode={typeSortKey} onChange={toggleSort} />{fl.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No items</div>}{sorted.map((it, idx) => <ListRow key={it.id} title={it.title} right={isLearned && it.starred ? <StarI size={14} color={ACCENT} fill={ACCENT} /> : !isLearned ? <Badge state={it.state} /> : null} onClick={() => onNav("detail", it.id)} noBorder={idx === sorted.length - 1} />)}</div>);
+    return (<div><PageHeader title={(contentType || "All") + "s"} subtitle={`${fl.length} items`} backLabel={backLabel} onBack={() => go(backLevel, domain, cat, subcat)} /><SortBar mode={typeSortKey} onChange={toggleSort} />{fl.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No items</div>}{sorted.map((it, idx) => <ListRow key={it.id} title={it.title} right={<Badge state={it.state} />} onClick={() => onNav("detail", it.id)} noBorder={idx === sorted.length - 1} />)}</div>);
   }
   return null;
 }
@@ -819,7 +825,7 @@ function TypeRowsOrFlat({ items, flatSort, onToggleSort, onTypeClick, onItemClic
     return (<div>
       <SortBar mode={flatSort} onChange={onToggleSort} />
       {sorted.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No items</div>}
-      {sorted.map((it, idx) => <ListRow key={it.id} title={it.title} meta={it.type} right={isLearned && it.starred ? <StarI size={14} color={ACCENT} fill={ACCENT} /> : !isLearned ? <Badge state={it.state} /> : null} onClick={() => onItemClick(it.id)} noBorder={idx === sorted.length - 1} compact={compact} />)}
+      {sorted.map((it, idx) => <ListRow key={it.id} title={it.title} meta={it.type} right={<Badge state={it.state} />} onClick={() => onItemClick(it.id)} noBorder={idx === sorted.length - 1} compact={compact} />)}
     </div>);
   }
   const typeRows = TYPES.map(t => ({ type: t, count: items.filter(i => i.type === t).length }));
@@ -911,7 +917,10 @@ function SettingsView({ items, onExport, onImport, onBulkMove, lastExport, strea
    ═══════════════════════════════════════════════════════ */
 function Sidebar({ view, activeDomain, onNav, items }) {
   const tax = useTaxonomy();
-  const lib = useNavCounts(items, "library"); const lrn = useNavCounts(items, "learned");
+  const lib = useNavCounts(items, "library"); const lrn = useNavCounts(items, "learned"); const vlt = useNavCounts(items, "vault");
+  const [vaultOpen, setVaultOpen] = useState(false);
+  const isVlt = view === "vault";
+  useEffect(() => { if (isVlt) setVaultOpen(true); }, [isVlt]);
   const si = (active, indent) => ({ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px 8px " + (16 + (indent||0)) + "px", color: active ? ACCENT : TEXT_DIM, fontSize: (indent||0) > 0 ? 12.5 : 13, fontWeight: active ? 600 : 400, cursor: "pointer", background: "transparent", borderLeft: active ? "2px solid " + ACCENT : "2px solid transparent", transition: "all 0.15s", whiteSpace: "nowrap" });
   const ct = (n) => <span style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 400, marginLeft: 2 }}>({n})</span>;
   const isLib = view === "library";
@@ -931,6 +940,14 @@ function Sidebar({ view, activeDomain, onNav, items }) {
       {tax.proDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 14)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
       <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Personal</div>
       {tax.perDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 14)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
+      <div style={{ borderTop: "1px solid " + SEPARATOR, margin: "14px 16px" }} />
+      <div onClick={() => { onNav("vault"); setVaultOpen(!vaultOpen); }} style={si(isVlt && !activeDomain, 0)}><StarI size={16} color={isVlt ? ACCENT : TEXT_DIM} fill={isVlt ? ACCENT : "none"} /> Vault {ct(vlt._pro + vlt._per)} <ChevR size={10} color={TEXT_MUTED} style={{ transform: vaultOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", marginLeft: "auto" }} /></div>
+      {vaultOpen && (<>
+        <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Professional</div>
+        {tax.proDomains.map(d => <div key={"v-"+d.name} onClick={() => onNav("vault", d.name)} style={si(isVlt && activeDomain === d.name, 14)}>{d.name} {ct(vlt[d.name] || 0)}</div>)}
+        <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Personal</div>
+        {tax.perDomains.map(d => <div key={"v-"+d.name} onClick={() => onNav("vault", d.name)} style={si(isVlt && activeDomain === d.name, 14)}>{d.name} {ct(vlt[d.name] || 0)}</div>)}
+      </>)}
     </div>
   );
 }
@@ -940,7 +957,10 @@ function Sidebar({ view, activeDomain, onNav, items }) {
    ═══════════════════════════════════════════════════════ */
 function MobileSidebar({ view, activeDomain, onNav, items }) {
   const tax = useTaxonomy();
-  const lib = useNavCounts(items, "library"); const lrn = useNavCounts(items, "learned");
+  const lib = useNavCounts(items, "library"); const lrn = useNavCounts(items, "learned"); const vlt = useNavCounts(items, "vault");
+  const [vaultOpen, setVaultOpen] = useState(false);
+  const isVlt = view === "vault";
+  useEffect(() => { if (isVlt) setVaultOpen(true); }, [isVlt]);
   const si = (active, indent) => ({ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px 7px " + (10 + (indent||0)) + "px", color: active ? ACCENT : TEXT_DIM, fontSize: (indent||0) > 0 ? 10.5 : 11, fontWeight: active ? 600 : 400, cursor: "pointer", background: "transparent", borderLeft: active ? "2px solid " + ACCENT : "2px solid transparent", transition: "all 0.15s", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
   const ct = (n) => <span style={{ fontSize: 9, color: TEXT_MUTED, fontWeight: 400, marginLeft: 2 }}>({n})</span>;
   const isLib = view === "library";
@@ -960,6 +980,14 @@ function MobileSidebar({ view, activeDomain, onNav, items }) {
       {tax.proDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 6)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
       <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Personal</div>
       {tax.perDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 6)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
+      <div style={{ borderTop: "1px solid " + SEPARATOR, margin: "10px 10px" }} />
+      <div onClick={() => { onNav("vault"); setVaultOpen(!vaultOpen); }} style={si(isVlt && !activeDomain, 0)}><StarI size={13} color={isVlt ? ACCENT : TEXT_DIM} fill={isVlt ? ACCENT : "none"} /> <span>Vault {ct(vlt._pro + vlt._per)}</span> <ChevR size={8} color={TEXT_MUTED} style={{ transform: vaultOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", marginLeft: "auto" }} /></div>
+      {vaultOpen && (<>
+        <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Professional</div>
+        {tax.proDomains.map(d => <div key={"v-"+d.name} onClick={() => onNav("vault", d.name)} style={si(isVlt && activeDomain === d.name, 6)}>{d.name} {ct(vlt[d.name] || 0)}</div>)}
+        <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Personal</div>
+        {tax.perDomains.map(d => <div key={"v-"+d.name} onClick={() => onNav("vault", d.name)} style={si(isVlt && activeDomain === d.name, 6)}>{d.name} {ct(vlt[d.name] || 0)}</div>)}
+      </>)}
     </div>
   );
 }
@@ -976,7 +1004,7 @@ function BottomNav({ view, onNav, onQuickAdd, onFullAdd }) {
       <button style={bi(view === "search")} onClick={() => onNav("search")}><SearchIcon size={20} color={view === "search" ? ACCENT : TEXT_DIM} /><span>Search</span></button>
       <button style={bi(view === "quickadd")} onClick={onQuickAdd}><BoltIcon size={20} color={view === "quickadd" ? ACCENT : TEXT_DIM} /><span>Quick</span></button>
       <button style={bi(view === "add")} onClick={onFullAdd}><PlusI size={20} color={view === "add" ? ACCENT : TEXT_DIM} /><span>Add</span></button>
-      <button style={bi(view === "starred")} onClick={() => onNav("starred")}><StarI size={20} color={view === "starred" ? ACCENT : TEXT_DIM} fill={view === "starred" ? ACCENT : "none"} /><span>Starred</span></button>
+      <button style={bi(view === "vault")} onClick={() => onNav("vault")}><StarI size={20} color={view === "vault" ? ACCENT : TEXT_DIM} fill={view === "vault" ? ACCENT : "none"} /><span>Vault</span></button>
       <button style={bi(view === "settings")} onClick={() => onNav("settings")}><SettingsIcon size={20} color={view === "settings" ? ACCENT : TEXT_DIM} /><span>Settings</span></button>
     </div>
   );
@@ -985,7 +1013,6 @@ function BottomNav({ view, onNav, onQuickAdd, onFullAdd }) {
 /* ═══════════════════════════════════════════════════════
    MAIN APP
    ═══════════════════════════════════════════════════════ */
-
 /* ═══════════════════════════════════════════════════════
    PRODUCTION APP — Firestore-backed
    ═══════════════════════════════════════════════════════ */
@@ -1040,7 +1067,7 @@ function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, upda
   const nav = useCallback((v, a1, a2, a3, a4) => {
     if (v === "library") { setView("library"); setActiveDomain(a1 || null); }
     else if (v === "learned") { setView("learned"); setActiveDomain(a1 || null); }
-    else if (v === "starred") { setView("starred"); setActiveDomain(a1 || null); }
+    else if (v === "vault") { setView("vault"); setActiveDomain(a1 || null); }
     else if (v === "search") { setView("search"); setActiveDomain(null); }
     else if (v === "recent") { setView("recent"); setActiveDomain(null); }
     else if (v === "settings") { setView("settings"); setActiveDomain(null); }
@@ -1102,13 +1129,24 @@ function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, upda
     fsSaveBatch(updated);
     setView("library");
   };
-  const toggleStar = id => {
-    setItems(prev => prev.map(i => { 
-      if (i.id !== id || i.state !== STATES.LEARNED) return i;
-      const updated = { ...i, starred: !i.starred, updatedAt: new Date().toISOString() };
+  const handleMoveVault = (id) => {
+    const now = new Date().toISOString();
+    setItems(prev => prev.map(i => {
+      if (i.id !== id) return i;
+      const updated = { ...i, state: STATES.VAULT, updatedAt: now };
       persistItem(updated);
       return updated;
     }));
+  };
+  const handleMoveLearned = (id) => {
+    const now = new Date().toISOString();
+    setItems(prev => prev.map(i => {
+      if (i.id !== id) return i;
+      const updated = { ...i, state: STATES.LEARNED, date_learned: i.date_learned || now, updatedAt: now };
+      persistItem(updated);
+      return updated;
+    }));
+    setStreak(prev => recordLearned(resolveStreak(prev)));
   };
   const activeItem = items.find(i => i.id === itemId);
 
@@ -1190,9 +1228,9 @@ function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, upda
       case "search": return <SearchView items={items} onNav={nav} />;
       case "recent": return <RecentView items={items} onNav={nav} />;
       case "settings": return <SettingsView items={items} onExport={handleExport} onImport={handleImport} onBulkMove={() => setView("bulkmove")} lastExport={lastExport} streak={streak} customTax={customTax} onRemoveCategory={handleRemoveTax} allTags={allTags} onRemoveTag={handleRemoveTag} />;
-      case "starred": return <DrillView key="star" items={items} onNav={nav} onAddTax={handleAddTax} onRenameTax={handleRenameTax} isStarred={true} compact={compact} initDomain={activeDomain} />;
+      case "vault": return <DrillView key="vault" items={items} onNav={nav} onAddTax={handleAddTax} onRenameTax={handleRenameTax} isVault={true} compact={compact} initDomain={activeDomain} />;
       case "bulkmove": return <BulkMoveView items={items} onMove={handleBulkMove} onBack={() => setView("settings")} />;
-      case "detail": return activeItem ? <ItemDetail item={activeItem} onBack={goBackDetail} onEdit={() => nav("edit", activeItem)} onDelete={handleDelete} onToggleStar={() => toggleStar(activeItem.id)} onSynthesisChange={handleSynthesis} onMarkLearned={handleMarkLearned} /> : null;
+      case "detail": return activeItem ? <ItemDetail item={activeItem} onBack={goBackDetail} onEdit={() => nav("edit", activeItem)} onDelete={handleDelete} onMoveVault={() => handleMoveVault(activeItem.id)} onSynthesisChange={handleSynthesis} onMarkLearned={handleMarkLearned} /> : null;
       case "quickadd": return <QuickAdd onSave={handleSave} onCancel={() => setView(prevView || "library")} />;
       case "add": return <AddEditPage initDomain={addInit.domain} initCat={addInit.cat} initSub={addInit.subcat} onSave={handleSave} onCancel={() => setView(prevView || "library")} allTags={allTags} onCreateTag={handleCreateTag} />;
       case "edit": return editItem ? <AddEditPage item={editItem} onSave={handleSave} onCancel={() => setView("detail")} allTags={allTags} onCreateTag={handleCreateTag} /> : null;
