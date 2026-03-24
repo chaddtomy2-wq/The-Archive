@@ -27,8 +27,8 @@ input, select, textarea, button { font-family: inherit; }
 <div id="root"></div>
 <script type="text/babel">
 const APP_NAME = "the-archive";
-const APP_VERSION = "V2";
-const BUILD_DATE = "2026-02-28";
+const APP_VERSION = "V3";
+const BUILD_DATE = "2026-03-24";
 const SCHEMA_VERSION = 2;
 
 const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } = React;
@@ -182,9 +182,11 @@ const DEFAULT_DOMAINS = [
   { name: "Relationships", group: "Personal", categories: {} },
   { name: "Philosophy", group: "Personal", categories: {} },
   { name: "Lifestyle", group: "Personal", categories: {} },
+  { name: "Podcasts", group: "Podcasts", categories: {} },
 ];
 
 const COUNTRY_DOMAINS = ["Geopolitics"];
+const PODCAST_DOMAINS = ["Podcasts"];
 const COUNTRIES = ["Afghanistan","Albania","Algeria","Andorra","Angola","Argentina","Armenia","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Cambodia","Cameroon","Canada","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo","Costa Rica","Croatia","Cuba","Cyprus","Czech Republic","Denmark","Djibouti","Dominican Republic","DR Congo","East Timor","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia","Fiji","Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Guatemala","Guinea","Guyana","Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran","Iraq","Ireland","Israel","Italy","Ivory Coast","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Mauritania","Mauritius","Mexico","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar","Namibia","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway","Oman","Pakistan","Palestine","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar","Romania","Russia","Rwanda","Saudi Arabia","Senegal","Serbia","Sierra Leone","Singapore","Slovakia","Slovenia","Somalia","South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Togo","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Uganda","Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay","Uzbekistan","Vatican City","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe"];
 const genId = () => "arch_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
 
@@ -254,8 +256,9 @@ function buildTaxonomy(customs) {
 
   const proDomains = domains.filter(d => d.group === "Professional");
   const perDomains = domains.filter(d => d.group === "Personal");
+  const podDomains = domains.filter(d => d.group === "Podcasts");
   const allDomainNames = domains.map(d => d.name);
-  return { domains, domainMap, proDomains, perDomains, allDomainNames };
+  return { domains, domainMap, proDomains, perDomains, podDomains, allDomainNames };
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -290,8 +293,10 @@ function migrateItems(rawItems, oldSynthesis) {
     if (m.level_4 === undefined) m.level_4 = null;
     // Set group based on domain
     const perNames = DEFAULT_DOMAINS.filter(d => d.group === "Personal").map(d => d.name);
+    const podNames = DEFAULT_DOMAINS.filter(d => d.group === "Podcasts").map(d => d.name);
     if (perNames.includes(m.level_2)) m.level_1 = "Personal";
-    else if (m.level_1 !== "Personal") m.level_1 = "Professional";
+    else if (podNames.includes(m.level_2)) m.level_1 = "Podcasts";
+    else if (m.level_1 !== "Personal" && m.level_1 !== "Podcasts") m.level_1 = "Professional";
 
     m.schemaVersion = SCHEMA_VERSION;
     return m;
@@ -316,10 +321,11 @@ function useNavCounts(items, mode) {
     const active = items.filter(i => !i.deleted);
     const f = mode === "vault" ? active.filter(i => i.state === STATES.VAULT) : mode === "learned" ? active.filter(i => i.state === STATES.LEARNED) : active.filter(i => i.state !== STATES.LEARNED && i.state !== STATES.VAULT);
     const c = {};
-    let pro = 0, per = 0;
+    let pro = 0, per = 0, pod = 0;
     tax.proDomains.forEach(d => { const n = f.filter(i => i.level_2 === d.name).length; c[d.name] = n; pro += n; });
     tax.perDomains.forEach(d => { const n = f.filter(i => i.level_2 === d.name).length; c[d.name] = n; per += n; });
-    c._pro = pro; c._per = per;
+    tax.podDomains.forEach(d => { const n = f.filter(i => i.level_2 === d.name).length; c[d.name] = n; pod += n; });
+    c._pro = pro; c._per = per; c._pod = pod;
     return c;
   }, [items, mode, tax]);
 }
@@ -506,7 +512,7 @@ function QuickAdd({ onSave, onCancel }) {
       <PageHeader title="Quick Add" backLabel="Back" onBack={onCancel} />
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
         <div><label style={lbl}>Link</label><input style={inp} value={url} onChange={e => setUrl(e.target.value)} placeholder="Paste URL" autoFocus /></div>
-        <div><label style={lbl}>Domain</label><select style={sel} value={domain} onChange={e => setDomain(e.target.value)}><option value="">— Pick later —</option><optgroup label="Professional">{tax.proDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup><optgroup label="Personal">{tax.perDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup></select></div>
+        <div><label style={lbl}>Domain</label><select style={sel} value={domain} onChange={e => setDomain(e.target.value)}><option value="">— Pick later —</option><optgroup label="Professional">{tax.proDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup><optgroup label="Personal">{tax.perDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup>{tax.podDomains.length > 0 && <optgroup label="Podcasts">{tax.podDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup>}</select></div>
         <button onClick={save} style={{ padding: "13px 0", fontSize: 14, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: ACCENT, color: "#111", cursor: "pointer" }}>Save</button>
       </div>
     </div>
@@ -541,7 +547,7 @@ function TagPicker({ selected, onChange, allTags, onCreateTag }) {
 function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, allTags, onCreateTag }) {
   const tax = useTaxonomy();
   const isEdit = !!item;
-  const [type, setType] = useState(item?.type || "Article");
+  const [type, setType] = useState(item?.type || (PODCAST_DOMAINS.includes(initDomain) ? "Video" : "Article"));
   const [title, setTitle] = useState(item?.title || "");
   const [domain, setDomain] = useState(item?.level_2 || initDomain || "");
   const [cat, setCat] = useState(item?.level_3 || initCat || "");
@@ -557,6 +563,7 @@ function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, all
   const catKeys = domainObj ? Object.keys(domainObj.categories) : [];
   const subcatKeys = domainObj && cat && domainObj.categories[cat] ? domainObj.categories[cat] : [];
   const needsCountries = COUNTRY_DOMAINS.includes(domain);
+  const isPodcast = PODCAST_DOMAINS.includes(domain);
   const group = domainObj ? domainObj.group : "Professional";
 
   const save = () => {
@@ -571,7 +578,7 @@ function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, all
     const wasL = item?.state === STATES.LEARNED;
     const trans = state === STATES.LEARNED && !wasL;
     const now = new Date().toISOString();
-    onSave({ id: item?.id || genId(), ownerId: item?.ownerId || "local", createdAt: item?.createdAt || now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type, title: title.trim(), content, image_url: type === "Chart" ? image_url : "", source, tags, countries: needsCountries ? countries : (item?.countries || []), level_1: group, level_2: domain, level_3: cat || null, level_4: subcat || null, state, core_takeaway: item?.core_takeaway || "", date_added: item?.date_added || now, date_learned: trans ? now : (item?.date_learned || null),  synthesis: item?.synthesis || "", synthesisUpdatedAt: item?.synthesisUpdatedAt || null, deleted: false, deletedAt: null });
+    onSave({ id: item?.id || genId(), ownerId: item?.ownerId || "local", createdAt: item?.createdAt || now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type: isPodcast ? "Video" : type, title: title.trim(), content, image_url: type === "Chart" ? image_url : "", source, tags, countries: needsCountries ? countries : (item?.countries || []), level_1: group, level_2: domain, level_3: cat || null, level_4: subcat || null, state, core_takeaway: item?.core_takeaway || "", date_added: item?.date_added || now, date_learned: trans ? now : (item?.date_learned || null),  synthesis: item?.synthesis || "", synthesisUpdatedAt: item?.synthesisUpdatedAt || null, deleted: false, deletedAt: null });
   };
   const lbl = { fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 8, display: "block" };
   const inp = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "11px 13px", color: TEXT, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
@@ -580,9 +587,9 @@ function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, all
     <div style={{ maxWidth: 640, padding: "0 0 60px" }}>
       <PageHeader title={isEdit ? "Edit Item" : "Add Item"} backLabel="Back" onBack={onCancel} />
       <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-        <div><label style={lbl}>Type</label><div style={{ display: "flex", gap: 6 }}>{TYPES.map(t => <button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: "9px 0", fontSize: 12, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: type === t ? "none" : `1px solid ${BORDER}`, background: type === t ? ACCENT : "transparent", color: type === t ? "#111" : TEXT_DIM, cursor: "pointer" }}>{t}</button>)}</div></div>
+        {!isPodcast && <div><label style={lbl}>Type</label><div style={{ display: "flex", gap: 6 }}>{TYPES.map(t => <button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: "9px 0", fontSize: 12, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: type === t ? "none" : `1px solid ${BORDER}`, background: type === t ? ACCENT : "transparent", color: type === t ? "#111" : TEXT_DIM, cursor: "pointer" }}>{t}</button>)}</div></div>}
         <div><label style={lbl}>Title</label><input style={inp} value={title} onChange={e => setTitle(e.target.value)} /></div>
-        <div><label style={lbl}>Domain</label><select style={sel} value={domain} onChange={e => { setDomain(e.target.value); setCat(""); setSubcat(""); if (!COUNTRY_DOMAINS.includes(e.target.value)) { setCountries([]); setCountryErr(""); } }}><option value=""></option><optgroup label="Professional">{tax.proDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup><optgroup label="Personal">{tax.perDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup></select></div>
+        <div><label style={lbl}>Domain</label><select style={sel} value={domain} onChange={e => { const v = e.target.value; setDomain(v); setCat(""); setSubcat(""); if (PODCAST_DOMAINS.includes(v)) setType("Video"); if (!COUNTRY_DOMAINS.includes(v)) { setCountries([]); setCountryErr(""); } }}><option value=""></option><optgroup label="Professional">{tax.proDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup><optgroup label="Personal">{tax.perDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup>{tax.podDomains.length > 0 && <optgroup label="Podcasts">{tax.podDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup>}</select></div>
         {catKeys.length > 0 && <div><label style={lbl}>Category</label><select style={sel} value={cat} onChange={e => { setCat(e.target.value); setSubcat(""); }}><option value="">— None —</option>{catKeys.map(k => <option key={k} value={k}>{k}</option>)}</select></div>}
         {subcatKeys.length > 0 && <div><label style={lbl}>Subcategory</label><select style={sel} value={subcat} onChange={e => setSubcat(e.target.value)}><option value="">— None —</option>{subcatKeys.map(k => <option key={k} value={k}>{k}</option>)}</select></div>}
         {needsCountries && <div><label style={lbl}>Countries</label><CountryPicker selected={countries} onChange={c => { setCountries(c); if (c.length > 0) setCountryErr(""); }} />{countryErr && <div style={{ fontSize: 11, color: "#c44", marginTop: 6 }}>{countryErr}</div>}</div>}
@@ -691,6 +698,8 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isVault, co
       {rootTitle && <PageHeader title={rootTitle} subtitle={`${pool.length} items`} />}
       {isLearned && streakText && <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16, marginTop: -8 }}><FireIcon size={16} /><span style={{ fontSize: 13, fontWeight: 600, color: "#e8590c" }}>{streakText}</span><span style={{ fontSize: 12, color: TEXT_DIM }}>streak</span></div>}
       {isLearned && streak && streak.longest > streak.current && <div style={{ fontSize: 11, color: TEXT_MUTED, marginBottom: 16, marginTop: streakText ? -8 : -8 }}>Best: {streak.longest} day{streak.longest !== 1 ? "s" : ""}</div>}
+      {tax.podDomains.map((d, idx) => { const n = pool.filter(i => i.level_2 === d.name).length; return <ListRow key={d.name} title={d.name} meta={`${n} items`} onClick={() => go("domain", d.name)} compact={compact} />; })}
+      {tax.podDomains.length > 0 && <div style={{ marginTop: 12 }} />}
       {!readOnly && <PageHeader title="Professional" subtitle={`${proCount} items`} onAdd={() => onNav("add")} compact={compact} />}
       {readOnly && <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, padding: "8px 0 4px" }}>Professional</div>}
       {proDomains.map((d, idx) => { const n = pool.filter(i => i.level_2 === d.name).length; return <ListRow key={d.name} title={d.name} meta={`${n} items`} onClick={() => go("domain", d.name)} noBorder={idx === proDomains.length - 1} compact={compact} />; })}
@@ -727,7 +736,7 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isVault, co
       return (<div><PageHeader title={domain} subtitle={`${cfItems.length} items`} backLabel={isVault ? "Vault" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain)} compact={compact} /><CountryFilter items={domainItems} value={countryFilter} onChange={setCountryFilter} /><div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 14 }}>{countryFilter} &bull; {sorted.length} items</div><SortBar mode={flatSort || "added"} onChange={toggleSort} />{sorted.map((it, idx) => <ListRow key={it.id} title={`${it.title} \u2014 ${it.type}`} onClick={() => onNav("detail", it.id)} noBorder={idx === sorted.length - 1} compact={compact} />)}</div>);
     }
     const typeRows = TYPES.map(t => ({ type: t, count: cfItems.filter(i => i.type === t).length }));
-    return (<div><PageHeader title={domain} subtitle={`${cfItems.length} items`} backLabel={isVault ? "Vault" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain)} compact={compact} />{showCountry && <CountryFilter items={domainItems} value={countryFilter} onChange={setCountryFilter} />}<TypeRowsOrFlat items={cfItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, null, null, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} addBtn={!isLearned ? <AddBtn label="Add category" onClick={() => onAddTax({ type: "category", domain })} /> : null} /></div>);
+    return (<div><PageHeader title={domain} subtitle={`${cfItems.length} items`} backLabel={isVault ? "Vault" : isLearned ? "Learned" : (dObj?.group || "Back")} onBack={() => go("root")} onEdit={() => onRenameTax({ level: "domain", oldName: domain })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain)} compact={compact} />{showCountry && <CountryFilter items={domainItems} value={countryFilter} onChange={setCountryFilter} />}<TypeRowsOrFlat items={cfItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, null, null, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} addBtn={!isLearned && !PODCAST_DOMAINS.includes(domain) ? <AddBtn label="Add category" onClick={() => onAddTax({ type: "category", domain })} /> : null} allowedTypes={PODCAST_DOMAINS.includes(domain) ? ["Video"] : null} /></div>);
   }
 
   // CATEGORY — show subcategories (or type rows if none)
@@ -744,13 +753,13 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isVault, co
       </div>);
     }
     const typeRows = TYPES.map(t => ({ type: t, count: catItems.filter(i => i.type === t).length }));
-    return (<div><PageHeader title={cat} subtitle={`${catItems.length} items`} backLabel={domain} onBack={() => go("domain", domain)} onEdit={() => onRenameTax({ level: "category", oldName: cat, domain })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain, cat)} compact={compact} /><TypeRowsOrFlat items={catItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, cat, null, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} addBtn={!isLearned ? <AddBtn label="Add subcategory" onClick={() => onAddTax({ type: "subcategory", domain, category: cat })} /> : null} /></div>);
+    return (<div><PageHeader title={cat} subtitle={`${catItems.length} items`} backLabel={domain} onBack={() => go("domain", domain)} onEdit={() => onRenameTax({ level: "category", oldName: cat, domain })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain, cat)} compact={compact} /><TypeRowsOrFlat items={catItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, cat, null, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} addBtn={!isLearned ? <AddBtn label="Add subcategory" onClick={() => onAddTax({ type: "subcategory", domain, category: cat })} /> : null} allowedTypes={PODCAST_DOMAINS.includes(domain) ? ["Video"] : null} /></div>);
   }
 
   // SUBCATEGORY — type rows
   if (level === "subcategory") {
     const scItems = pool.filter(i => i.level_2 === domain && i.level_3 === cat && i.level_4 === subcat);
-    return (<div><PageHeader title={subcat} subtitle={`${scItems.length} items`} backLabel={cat} onBack={() => go("category", domain, cat)} onEdit={() => onRenameTax({ level: "subcategory", oldName: subcat, domain, category: cat })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain, cat, subcat)} compact={compact} /><TypeRowsOrFlat items={scItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, cat, subcat, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} /></div>);
+    return (<div><PageHeader title={subcat} subtitle={`${scItems.length} items`} backLabel={cat} onBack={() => go("category", domain, cat)} onEdit={() => onRenameTax({ level: "subcategory", oldName: subcat, domain, category: cat })} onAdd={(isLearned || isVault) ? undefined : () => onNav("add", domain, cat, subcat)} compact={compact} /><TypeRowsOrFlat items={scItems} flatSort={flatSort} onToggleSort={toggleSort} onTypeClick={(t) => go("types", domain, cat, subcat, t)} onItemClick={(id) => onNav("detail", id)} isLearned={isLearned} compact={compact} allowedTypes={PODCAST_DOMAINS.includes(domain) ? ["Video"] : null} /></div>);
   }
 
   // TYPES — item list filtered by type
@@ -819,7 +828,8 @@ function sortItems(list, mode) {
   if (mode === "learned") return arr.sort((a, b) => (b.date_learned || "").localeCompare(a.date_learned || ""));
   return arr.sort((a, b) => (b.date_added || b.createdAt || "").localeCompare(a.date_added || a.createdAt || ""));
 }
-function TypeRowsOrFlat({ items, flatSort, onToggleSort, onTypeClick, onItemClick, isLearned, compact, addBtn }) {
+function TypeRowsOrFlat({ items, flatSort, onToggleSort, onTypeClick, onItemClick, isLearned, compact, addBtn, allowedTypes }) {
+  const types = allowedTypes || TYPES;
   if (flatSort) {
     const sorted = sortItems(items, flatSort);
     return (<div>
@@ -828,7 +838,7 @@ function TypeRowsOrFlat({ items, flatSort, onToggleSort, onTypeClick, onItemClic
       {sorted.map((it, idx) => <ListRow key={it.id} title={it.title} meta={it.type} right={<Badge state={it.state} />} onClick={() => onItemClick(it.id)} noBorder={idx === sorted.length - 1} compact={compact} />)}
     </div>);
   }
-  const typeRows = TYPES.map(t => ({ type: t, count: items.filter(i => i.type === t).length }));
+  const typeRows = types.map(t => ({ type: t, count: items.filter(i => i.type === t).length }));
   return (<div>
     <SortBar mode={null} onChange={onToggleSort} />
     {typeRows.map((r, i) => <ListRow key={r.type} title={`${r.type}s (${r.count})`} onClick={r.count > 0 ? () => onTypeClick(r.type) : undefined} noBorder={i === typeRows.length - 1 && !addBtn} compact={compact} />)}
@@ -871,7 +881,7 @@ function BulkMoveView({ items, onMove, onBack }) {
   return (<div style={{ maxWidth: 640, paddingBottom: 60 }}>
     <PageHeader title="Move To" subtitle={`${selected.size} items`} backLabel="Back" onBack={() => setStep("select")} />
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <div><label style={lbl}>Domain</label><select style={inp} value={tDomain} onChange={e => { setTDomain(e.target.value); setTCat(""); setTSub(""); }}><option value="">— Select —</option><optgroup label="Professional">{tax.proDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup><optgroup label="Personal">{tax.perDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup></select></div>
+      <div><label style={lbl}>Domain</label><select style={inp} value={tDomain} onChange={e => { setTDomain(e.target.value); setTCat(""); setTSub(""); }}><option value="">— Select —</option><optgroup label="Professional">{tax.proDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup><optgroup label="Personal">{tax.perDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup>{tax.podDomains.length > 0 && <optgroup label="Podcasts">{tax.podDomains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}</optgroup>}</select></div>
       {catKeys.length > 0 && <div><label style={lbl}>Category</label><select style={inp} value={tCat} onChange={e => { setTCat(e.target.value); setTSub(""); }}><option value="">— None —</option>{catKeys.map(k => <option key={k} value={k}>{k}</option>)}</select></div>}
       {subKeys.length > 0 && <div><label style={lbl}>Subcategory</label><select style={inp} value={tSub} onChange={e => setTSub(e.target.value)}><option value="">— None —</option>{subKeys.map(k => <option key={k} value={k}>{k}</option>)}</select></div>}
       <button onClick={() => { if (!tDomain) return; const group = domObj ? domObj.group : "Professional"; onMove([...selected], { level_1: group, level_2: tDomain, level_3: tCat || null, level_4: tSub || null }); }} style={{ padding: "13px 0", fontSize: 14, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: tDomain ? ACCENT : TEXT_MUTED, color: "#111", cursor: tDomain ? "pointer" : "default" }}>Move {selected.size} item{selected.size !== 1 ? "s" : ""}</button>
@@ -928,21 +938,24 @@ function Sidebar({ view, activeDomain, onNav, items }) {
   return (
     <div style={{ width: 220, background: BG, borderRight: "1px solid " + SEPARATOR, display: "flex", flexDirection: "column", height: "100vh", position: "fixed", left: 0, top: 0, zIndex: 50, overflowY: "auto" }}>
       <div style={{ padding: "24px 18px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}><div style={{ fontSize: 13.5, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: ACCENT }}>The Archive</div><div style={{ display: "flex", gap: 8 }}><div onClick={() => onNav("search")} style={{ cursor: "pointer", padding: 4 }}><SearchIcon size={15} color={view === "search" ? ACCENT : TEXT_DIM} /></div><div onClick={() => onNav("settings")} style={{ cursor: "pointer", padding: 4 }}><SettingsIcon size={15} color={view === "settings" ? ACCENT : TEXT_DIM} /></div></div></div>
-      <div onClick={() => onNav("library")} style={si(isLib && !activeDomain, 0)}><HomeIcon size={16} color={isLib ? ACCENT : TEXT_DIM} /> Library {ct(lib._pro + lib._per)}</div>
+      <div onClick={() => onNav("library")} style={si(isLib && !activeDomain, 0)}><HomeIcon size={16} color={isLib ? ACCENT : TEXT_DIM} /> Library {ct(lib._pro + lib._per + lib._pod)}</div>
       <div onClick={() => onNav("recent")} style={si(view === "recent", 0)}><ClockIcon size={16} color={view === "recent" ? ACCENT : TEXT_DIM} /> Recent</div>
+      {tax.podDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 0)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
       <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Professional</div>
       {tax.proDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 14)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
       <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Personal</div>
       {tax.perDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 14)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
       <div style={{ borderTop: "1px solid " + SEPARATOR, margin: "14px 16px" }} />
-      <div onClick={() => onNav("learned")} style={si(isLrn && !activeDomain, 0)}><TrophyIcon size={16} color={isLrn ? ACCENT : TEXT_DIM} /> Learned {ct(lrn._pro + lrn._per)}</div>
+      <div onClick={() => onNav("learned")} style={si(isLrn && !activeDomain, 0)}><TrophyIcon size={16} color={isLrn ? ACCENT : TEXT_DIM} /> Learned {ct(lrn._pro + lrn._per + lrn._pod)}</div>
+      {tax.podDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 0)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
       <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Professional</div>
       {tax.proDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 14)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
       <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Personal</div>
       {tax.perDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 14)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
       <div style={{ borderTop: "1px solid " + SEPARATOR, margin: "14px 16px" }} />
-      <div onClick={() => { onNav("vault"); setVaultOpen(!vaultOpen); }} style={si(isVlt && !activeDomain, 0)}><StarI size={16} color={isVlt ? ACCENT : TEXT_DIM} fill={isVlt ? ACCENT : "none"} /> Vault {ct(vlt._pro + vlt._per)} <ChevR size={10} color={TEXT_MUTED} style={{ transform: vaultOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", marginLeft: "auto" }} /></div>
+      <div onClick={() => { onNav("vault"); setVaultOpen(!vaultOpen); }} style={si(isVlt && !activeDomain, 0)}><StarI size={16} color={isVlt ? ACCENT : TEXT_DIM} fill={isVlt ? ACCENT : "none"} /> Vault {ct(vlt._pro + vlt._per + vlt._pod)} <ChevR size={10} color={TEXT_MUTED} style={{ transform: vaultOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", marginLeft: "auto" }} /></div>
       {vaultOpen && (<>
+        {tax.podDomains.map(d => <div key={"v-"+d.name} onClick={() => onNav("vault", d.name)} style={si(isVlt && activeDomain === d.name, 0)}>{d.name} {ct(vlt[d.name] || 0)}</div>)}
         <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Professional</div>
         {tax.proDomains.map(d => <div key={"v-"+d.name} onClick={() => onNav("vault", d.name)} style={si(isVlt && activeDomain === d.name, 14)}>{d.name} {ct(vlt[d.name] || 0)}</div>)}
         <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Personal</div>
@@ -968,21 +981,24 @@ function MobileSidebar({ view, activeDomain, onNav, items }) {
   return (
     <div style={{ width: 140, minWidth: 140, background: BG, borderRight: "1px solid " + SEPARATOR, display: "flex", flexDirection: "column", height: "calc(100vh - 56px)", position: "fixed", left: 0, top: 0, zIndex: 50, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
       <div style={{ padding: "14px 10px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" }}><div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: ACCENT }}>The Archive</div><div onClick={() => onNav("search")} style={{ cursor: "pointer", padding: 2 }}><SearchIcon size={12} color={view === "search" ? ACCENT : TEXT_DIM} /></div></div>
-      <div onClick={() => onNav("library")} style={si(isLib && !activeDomain, 0)}><HomeIcon size={13} color={isLib ? ACCENT : TEXT_DIM} /> <span>Library {ct(lib._pro + lib._per)}</span></div>
+      <div onClick={() => onNav("library")} style={si(isLib && !activeDomain, 0)}><HomeIcon size={13} color={isLib ? ACCENT : TEXT_DIM} /> <span>Library {ct(lib._pro + lib._per + lib._pod)}</span></div>
       <div onClick={() => onNav("recent")} style={si(view === "recent", 0)}><ClockIcon size={13} color={view === "recent" ? ACCENT : TEXT_DIM} /> <span>Recent</span></div>
+      {tax.podDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 0)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
       <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Professional</div>
       {tax.proDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 6)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
       <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Personal</div>
       {tax.perDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 6)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
       <div style={{ borderTop: "1px solid " + SEPARATOR, margin: "10px 10px" }} />
-      <div onClick={() => onNav("learned")} style={si(isLrn && !activeDomain, 0)}><TrophyIcon size={13} color={isLrn ? ACCENT : TEXT_DIM} /> <span>Learned {ct(lrn._pro + lrn._per)}</span></div>
+      <div onClick={() => onNav("learned")} style={si(isLrn && !activeDomain, 0)}><TrophyIcon size={13} color={isLrn ? ACCENT : TEXT_DIM} /> <span>Learned {ct(lrn._pro + lrn._per + lrn._pod)}</span></div>
+      {tax.podDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 0)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
       <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Professional</div>
       {tax.proDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 6)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
       <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Personal</div>
       {tax.perDomains.map(d => <div key={"l-"+d.name} onClick={() => onNav("learned", d.name)} style={si(isLrn && activeDomain === d.name, 6)}>{d.name} {ct(lrn[d.name] || 0)}</div>)}
       <div style={{ borderTop: "1px solid " + SEPARATOR, margin: "10px 10px" }} />
-      <div onClick={() => { onNav("vault"); setVaultOpen(!vaultOpen); }} style={si(isVlt && !activeDomain, 0)}><StarI size={13} color={isVlt ? ACCENT : TEXT_DIM} fill={isVlt ? ACCENT : "none"} /> <span>Vault {ct(vlt._pro + vlt._per)}</span> <ChevR size={8} color={TEXT_MUTED} style={{ transform: vaultOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", marginLeft: "auto" }} /></div>
+      <div onClick={() => { onNav("vault"); setVaultOpen(!vaultOpen); }} style={si(isVlt && !activeDomain, 0)}><StarI size={13} color={isVlt ? ACCENT : TEXT_DIM} fill={isVlt ? ACCENT : "none"} /> <span>Vault {ct(vlt._pro + vlt._per + vlt._pod)}</span> <ChevR size={8} color={TEXT_MUTED} style={{ transform: vaultOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", marginLeft: "auto" }} /></div>
       {vaultOpen && (<>
+        {tax.podDomains.map(d => <div key={"v-"+d.name} onClick={() => onNav("vault", d.name)} style={si(isVlt && activeDomain === d.name, 0)}>{d.name} {ct(vlt[d.name] || 0)}</div>)}
         <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Professional</div>
         {tax.proDomains.map(d => <div key={"v-"+d.name} onClick={() => onNav("vault", d.name)} style={si(isVlt && activeDomain === d.name, 6)}>{d.name} {ct(vlt[d.name] || 0)}</div>)}
         <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Personal</div>
@@ -1013,6 +1029,7 @@ function BottomNav({ view, onNav, onQuickAdd, onFullAdd }) {
 /* ═══════════════════════════════════════════════════════
    MAIN APP
    ═══════════════════════════════════════════════════════ */
+
 /* ═══════════════════════════════════════════════════════
    PRODUCTION APP — Firestore-backed
    ═══════════════════════════════════════════════════════ */
@@ -1230,7 +1247,7 @@ function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, upda
       case "settings": return <SettingsView items={items} onExport={handleExport} onImport={handleImport} onBulkMove={() => setView("bulkmove")} lastExport={lastExport} streak={streak} customTax={customTax} onRemoveCategory={handleRemoveTax} allTags={allTags} onRemoveTag={handleRemoveTag} />;
       case "vault": return <DrillView key="vault" items={items} onNav={nav} onAddTax={handleAddTax} onRenameTax={handleRenameTax} isVault={true} compact={compact} initDomain={activeDomain} />;
       case "bulkmove": return <BulkMoveView items={items} onMove={handleBulkMove} onBack={() => setView("settings")} />;
-      case "detail": return activeItem ? <ItemDetail item={activeItem} onBack={goBackDetail} onEdit={() => nav("edit", activeItem)} onDelete={handleDelete} onMoveVault={() => handleMoveVault(activeItem.id)} onSynthesisChange={handleSynthesis} onMarkLearned={handleMarkLearned} /> : null;
+      case "detail": return activeItem ? <ItemDetail item={activeItem} onBack={goBackDetail} onEdit={() => nav("edit", activeItem)} onDelete={handleDelete} onMoveVault={() => handleMoveVault(activeItem.id)} onMoveLearned={() => handleMoveLearned(activeItem.id)} onSynthesisChange={handleSynthesis} onMarkLearned={handleMarkLearned} /> : null;
       case "quickadd": return <QuickAdd onSave={handleSave} onCancel={() => setView(prevView || "library")} />;
       case "add": return <AddEditPage initDomain={addInit.domain} initCat={addInit.cat} initSub={addInit.subcat} onSave={handleSave} onCancel={() => setView(prevView || "library")} allTags={allTags} onCreateTag={handleCreateTag} />;
       case "edit": return editItem ? <AddEditPage item={editItem} onSave={handleSave} onCancel={() => setView("detail")} allTags={allTags} onCreateTag={handleCreateTag} /> : null;
