@@ -1076,9 +1076,9 @@ function TheArchiveProduction() {
   const { items: firestoreItems, loaded, save: fsSave, saveBatch } = useFirestoreItems();
   const { prefs, update: updatePrefs } = useFirestorePrefs();
   
-  if (!loaded || !prefs) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e0e",color:"#777",fontSize:14 }}>Loading data...</div>;
-
   const uploadToStorage = useUploadToStorage();
+
+  if (!loaded || !prefs) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e0e",color:"#777",fontSize:14 }}>Loading data...</div>;
   return <TheArchiveInner 
     initialItems={firestoreItems} 
     fsSave={fsSave} 
