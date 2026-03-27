@@ -18,6 +18,7 @@ input, select, textarea, button { font-family: inherit; }
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
 <!-- React (UMD) + Babel -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -28,7 +29,7 @@ input, select, textarea, button { font-family: inherit; }
 <script type="text/babel">
 const APP_NAME = "the-archive";
 const APP_VERSION = "V3";
-const BUILD_DATE = "2026-03-24";
+const BUILD_DATE = "2026-03-27";
 const SCHEMA_VERSION = 2;
 
 const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } = React;
@@ -47,6 +48,7 @@ const firebaseConfig = {
 const fbApp = firebase.initializeApp(firebaseConfig);
 const auth = fbApp.auth();
 const db = fbApp.firestore();
+const storage = fbApp.storage();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
 function signIn() {
@@ -147,6 +149,23 @@ function useFirestorePrefs() {
 }
 
 /* ═══════════════════════════════════════════════════════
+   FIREBASE STORAGE — chart image uploads
+   ═══════════════════════════════════════════════════════ */
+function useUploadToStorage() {
+  const user = useUser();
+  return useCallback(async (file) => {
+    if (!user) throw new Error("Not authenticated");
+    const ext = file.name.split(".").pop() || "jpg";
+    const filename = "chart_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7) + "." + ext;
+    const ref = storage.ref("users/" + user.uid + "/media/" + filename);
+    await ref.put(file);
+    return await ref.getDownloadURL();
+  }, [user]);
+}
+
+
+
+/* ═══════════════════════════════════════════════════════
    DESIGN TOKENS
    ═══════════════════════════════════════════════════════ */
 const ACCENT = "#C9A84C";
@@ -155,15 +174,15 @@ const ACCENT_SUBTLE = "rgba(201,168,76,0.08)";
 const BG = "#0e0e0e";
 const BG_INPUT = "#181818";
 const TEXT = "#ddd";
-const TEXT_DIM = "#777";
-const TEXT_MUTED = "#444";
+const TEXT_DIM = "#999";
+const TEXT_MUTED = "#666";
 const BORDER = "#1f1f1f";
 const SEPARATOR = "#1a1a1a";
 
 /* ═══════════════════════════════════════════════════════
    CONSTANTS & DATA MODEL
    ═══════════════════════════════════════════════════════ */
-const STATES = { WANT: "Want to Learn", LIBRARY: "Library", LEARNED: "Learned", VAULT: "Vault" };
+const STATES = { WANT: "Want to Learn", LIBRARY: "Library", LEARNED: "Learned" };
 const TYPES = ["Article", "Tweet", "Video", "Chart"];
 
 /*  Unified default domains — every domain is a peer.
@@ -319,7 +338,7 @@ function useNavCounts(items, mode) {
   const tax = useTaxonomy();
   return useMemo(() => {
     const active = items.filter(i => !i.deleted);
-    const f = mode === "vault" ? active.filter(i => i.state === STATES.VAULT) : mode === "learned" ? active.filter(i => i.state === STATES.LEARNED) : active.filter(i => i.state !== STATES.LEARNED && i.state !== STATES.VAULT);
+    const f = mode === "vault" ? active.filter(i => i.vault && i.state === STATES.LEARNED) : mode === "learned" ? active.filter(i => i.state === STATES.LEARNED) : active.filter(i => i.state !== STATES.LEARNED);
     const c = {};
     let pro = 0, per = 0, pod = 0;
     tax.proDomains.forEach(d => { const n = f.filter(i => i.level_2 === d.name).length; c[d.name] = n; pro += n; });
@@ -419,11 +438,11 @@ function ImageModal({ src, onClose }) {
 /* ═══════════════════════════════════════════════════════
    SMALL COMPONENTS
    ═══════════════════════════════════════════════════════ */
-const Badge = ({ state }) => <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 3, background: state === STATES.VAULT ? "rgba(139,105,20,0.15)" : state === STATES.LEARNED ? ACCENT_SUBTLE : "rgba(255,255,255,0.04)", color: state === STATES.VAULT ? "#D4A017" : state === STATES.LEARNED ? ACCENT : TEXT_DIM }}>{state}</span>;
+function Badge({ state, vault }) { return <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.04em", padding: "2px 8px", borderRadius: 3, background: vault ? "rgba(139,105,20,0.15)" : state === STATES.LEARNED ? ACCENT_SUBTLE : "rgba(255,255,255,0.04)", color: vault ? "#D4A017" : state === STATES.LEARNED ? ACCENT : TEXT_DIM }}>{vault ? "Vault" : state}</span>; }
 
 function ConfirmModal({ message, confirmLabel, onConfirm, onCancel }) { return (<div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}><div style={{ background: "#1a1a1a", border: `1px solid ${BORDER}`, borderRadius: 10, padding: 24, maxWidth: 340, width: "100%" }}><div style={{ fontSize: 14, color: TEXT, lineHeight: 1.5, marginBottom: 20 }}>{message}</div><div style={{ display: "flex", gap: 10 }}><button onClick={onConfirm} style={{ flex: 1, padding: "11px 0", fontSize: 13, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: "#c44", color: "#fff", cursor: "pointer" }}>{confirmLabel || "Delete"}</button><button onClick={onCancel} style={{ flex: 1, padding: "11px 0", fontSize: 13, fontWeight: 500, fontFamily: "inherit", borderRadius: 5, border: `1px solid ${BORDER}`, background: "transparent", color: TEXT_DIM, cursor: "pointer" }}>Cancel</button></div></div></div>); }
-function ListRow({ title, meta, right, onClick, noBorder, compact }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: compact ? "11px 0" : "14px 0", borderBottom: noBorder ? "none" : `1px solid ${SEPARATOR}`, cursor: onClick ? "pointer" : "default", gap: 10 }}><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: compact ? 12.5 : 14, fontWeight: 500, color: TEXT, lineHeight: 1.4 }}>{title}</div>{meta && <div style={{ fontSize: compact ? 10.5 : 12, color: TEXT_MUTED, marginTop: 2, opacity: compact ? 0.7 : 1 }}>{meta}</div>}</div><div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>{right}{onClick && <ChevR size={compact ? 12 : 14} color={TEXT_MUTED} />}</div></div>); }
-function PageHeader({ title, subtitle, backLabel, onBack, onAdd, onEdit, compact }) { return (<div style={{ marginBottom: compact ? 4 : 8 }}>{onBack && <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: TEXT_DIM, fontSize: compact ? 11.5 : 13, fontFamily: "inherit", padding: compact ? "8px 0 2px 0" : "12px 0 4px 0" }}><ChevL size={compact ? 12 : 14} color={TEXT_DIM} /> {backLabel || "Back"}</button>}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: `${onBack ? (compact ? "6px" : "8px") : (compact ? "16px" : "24px")} 0 ${compact ? "10px" : "16px"}`, gap: 12 }}><div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}><div><h1 style={{ fontSize: compact ? 22 : 28, fontWeight: 700, letterSpacing: "-0.03em", color: TEXT, margin: 0, lineHeight: 1.1 }}>{title}</h1>{subtitle && <div style={{ fontSize: compact ? 11 : 13, color: TEXT_MUTED, marginTop: compact ? 4 : 6, opacity: compact ? 0.7 : 1 }}>{subtitle}</div>}</div>{onEdit && <button onClick={onEdit} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, marginTop: 2, flexShrink: 0 }}><EditI size={14} color={TEXT_MUTED} /></button>}</div>{onAdd && <button onClick={onAdd} style={{ display: "flex", alignItems: "center", gap: 4, padding: compact ? "6px 12px" : "8px 16px", borderRadius: 5, border: `1px solid ${ACCENT_DIM}`, background: "transparent", color: ACCENT, fontSize: compact ? 11 : 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, marginTop: 2 }}><PlusI size={compact ? 10 : 12} color={ACCENT} /> Add</button>}</div></div>); }
+function ListRow({ title, meta, right, onClick, noBorder, compact }) { return (<div onClick={onClick} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: compact ? "11px 0" : "14px 0", borderBottom: noBorder ? "none" : `1px solid ${SEPARATOR}`, cursor: onClick ? "pointer" : "default", gap: 10 }}><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: compact ? 12.5 : 14, fontWeight: 500, color: TEXT, lineHeight: 1.4 }}>{title}</div>{meta && <div style={{ fontSize: compact ? 10.5 : 12, color: TEXT_DIM, marginTop: 2 }}>{meta}</div>}</div><div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>{right}{onClick && <ChevR size={compact ? 12 : 14} color={TEXT_MUTED} />}</div></div>); }
+function PageHeader({ title, subtitle, backLabel, onBack, onAdd, onEdit, compact }) { return (<div style={{ marginBottom: compact ? 4 : 8 }}>{onBack && <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: TEXT_DIM, fontSize: compact ? 11.5 : 13, fontFamily: "inherit", padding: compact ? "8px 0 2px 0" : "12px 0 4px 0" }}><ChevL size={compact ? 12 : 14} color={TEXT_DIM} /> {backLabel || "Back"}</button>}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: `${onBack ? (compact ? "6px" : "8px") : (compact ? "16px" : "24px")} 0 ${compact ? "10px" : "16px"}`, gap: 12 }}><div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}><div><h1 style={{ fontSize: compact ? 22 : 28, fontWeight: 700, letterSpacing: "-0.03em", color: TEXT, margin: 0, lineHeight: 1.1 }}>{title}</h1>{subtitle && <div style={{ fontSize: compact ? 11 : 13, color: TEXT_DIM, marginTop: compact ? 4 : 6 }}>{subtitle}</div>}</div>{onEdit && <button onClick={onEdit} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, marginTop: 2, flexShrink: 0 }}><EditI size={14} color={TEXT_MUTED} /></button>}</div>{onAdd && <button onClick={onAdd} style={{ display: "flex", alignItems: "center", gap: 4, padding: compact ? "6px 12px" : "8px 16px", borderRadius: 5, border: `1px solid ${ACCENT_DIM}`, background: "transparent", color: ACCENT, fontSize: compact ? 11 : 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, marginTop: 2 }}><PlusI size={compact ? 10 : 12} color={ACCENT} /> Add</button>}</div></div>); }
 const AddBtn = ({ label, onClick }) => <div onClick={onClick} style={{ padding: "10px 0", fontSize: 12, color: TEXT_MUTED, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}><PlusI size={11} color={TEXT_MUTED} /> {label}</div>;
 
 /* ═══════════════════════════════════════════════════════
@@ -482,12 +501,33 @@ function CountryFilter({ items, value, onChange }) {
   if (uc.length === 0) return null;
   return <div style={{ marginBottom: 14 }}><select value={value} onChange={e => onChange(e.target.value)} style={{ background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "8px 32px 8px 12px", color: TEXT, fontSize: 12, outline: "none", fontFamily: "inherit", appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23777' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 10px center" }}><option value="">All Countries</option>{uc.map(c => <option key={c} value={c}>{c}</option>)}</select></div>;
 }
-function ChartUpload({ value, onChange, lbl }) {
-  const fileRef = useRef(null); const [dragOver, setDragOver] = useState(false);
-  const processFile = (file) => { if (!file || !file.type.startsWith("image/")) return; const reader = new FileReader(); reader.onload = (e) => onChange(e.target.result); reader.readAsDataURL(file); };
-  useEffect(() => { const handler = (e) => { const items = e.clipboardData?.items; if (!items) return; for (const item of items) { if (item.type.startsWith("image/")) { e.preventDefault(); processFile(item.getAsFile()); return; } } }; window.addEventListener("paste", handler); return () => window.removeEventListener("paste", handler); }, []);
-  const zone = { border: `1.5px dashed ${dragOver ? ACCENT : BORDER}`, borderRadius: 8, padding: value ? 0 : "28px 16px", textAlign: "center", cursor: "pointer", background: dragOver ? `${ACCENT}11` : BG_INPUT, transition: "all 0.15s", overflow: "hidden", position: "relative" };
-  return (<div><label style={lbl}>Chart Image</label><div style={zone} onClick={() => !value && fileRef.current?.click()} onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer?.files?.[0]; if (f) processFile(f); }} onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}>{value ? <div style={{ position: "relative" }}><img src={value} alt="Chart" style={{ width: "100%", display: "block", maxHeight: 300, objectFit: "contain", background: "#000" }} /><button onClick={(e) => { e.stopPropagation(); onChange(""); }} style={{ position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: 14, background: "rgba(0,0,0,0.7)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><CloseI size={14} color="#fff" /></button></div> : <div><div style={{ fontSize: 13, color: TEXT_DIM, marginBottom: 4 }}>Tap to upload from library</div><div style={{ fontSize: 11, color: TEXT_MUTED }}>or paste / drag an image</div></div>}</div><input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ""; }} /></div>);
+function ChartUpload({ value, onChange, lbl, uploadToStorage }) {
+  const fileRef = useRef(null); const pasteRef = useRef(null); const [dragOver, setDragOver] = useState(false); const [uploading, setUploading] = useState(false); const [focused, setFocused] = useState(false);
+  const processFile = async (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    if (uploadToStorage) {
+      setUploading(true);
+      try { const url = await uploadToStorage(file); onChange(url); } catch (err) { console.error("Upload failed:", err); }
+      setUploading(false);
+    } else {
+      const reader = new FileReader(); reader.onload = (e) => { const img = new Image(); img.onload = () => { const MAX = 1200; let w = img.width, h = img.height; if (w > MAX || h > MAX) { const r = Math.min(MAX / w, MAX / h); w = Math.round(w * r); h = Math.round(h * r); } const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").drawImage(img, 0, 0, w, h); let q = 0.7; let result = c.toDataURL("image/jpeg", q); while (result.length > 800000 && q > 0.2) { q -= 0.1; result = c.toDataURL("image/jpeg", q); } onChange(result); }; img.src = e.target.result; }; reader.readAsDataURL(file);
+    }
+  };
+  const handlePaste = (e) => { const items = e.clipboardData?.items; if (!items) return; for (const item of items) { if (item.type.startsWith("image/")) { e.preventDefault(); processFile(item.getAsFile()); return; } } };
+  return (<div><label style={lbl}>Chart Image</label>
+    {uploading ? <div style={{ border: `1.5px dashed ${ACCENT}`, borderRadius: 8, padding: "40px 16px", textAlign: "center", background: BG_INPUT }}><div style={{ fontSize: 13, color: ACCENT }}>Uploading...</div></div>
+    : value ? <div style={{ position: "relative", borderRadius: 8, overflow: "hidden", background: "#080808" }}><img src={value} alt="Chart" style={{ width: "100%", display: "block", maxHeight: 300, objectFit: "contain" }} /><button onClick={() => onChange("")} style={{ position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: 14, background: "rgba(0,0,0,0.7)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}><CloseI size={14} color="#fff" /></button></div>
+    : <div style={{ border: `1.5px dashed ${focused ? ACCENT : dragOver ? ACCENT : BORDER}`, borderRadius: 8, background: dragOver ? `${ACCENT}11` : BG_INPUT, transition: "all 0.15s" }} onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer?.files?.[0]; if (f) processFile(f); }} onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}>
+      <div ref={pasteRef} tabIndex={0} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onPaste={handlePaste} onClick={() => pasteRef.current?.focus()} style={{ padding: "32px 16px", textAlign: "center", outline: "none", cursor: "text" }}>
+        <div style={{ fontSize: 13, color: focused ? ACCENT : TEXT_DIM, marginBottom: 4, transition: "color 0.15s" }}>{focused ? "Paste now (Ctrl+V / Cmd+V)" : "Click here to paste an image"}</div>
+        <div style={{ fontSize: 11, color: TEXT_MUTED }}>or drag an image above</div>
+      </div>
+      <div style={{ borderTop: `1px solid ${BORDER}`, padding: "10px 16px", display: "flex", justifyContent: "center" }}>
+        <button onClick={() => fileRef.current?.click()} style={{ fontSize: 12, fontWeight: 600, color: ACCENT, background: "none", border: `1px solid ${ACCENT_DIM}`, borderRadius: 5, padding: "8px 20px", cursor: "pointer", fontFamily: "inherit" }}>Upload Image</button>
+      </div>
+    </div>}
+    <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ""; }} />
+  </div>);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -505,7 +545,7 @@ function QuickAdd({ onSave, onCancel }) {
     const domObj = domain ? tax.domainMap[domain] : null;
     const group = domObj ? domObj.group : "Professional";
     const now = new Date().toISOString();
-    onSave({ id: genId(), ownerId: "local", createdAt: now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type: "Article", title: url.trim(), content: url.trim(), image_url: "", source: "", tags: [], countries: [], level_1: group, level_2: domain || "", level_3: null, level_4: null, state: STATES.LIBRARY, core_takeaway: "", date_added: now, date_learned: null, synthesis: "", synthesisUpdatedAt: null, deleted: false, deletedAt: null });
+    onSave({ id: genId(), ownerId: "local", createdAt: now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type: "Article", title: url.trim(), content: url.trim(), image_url: "", source: "", tags: [], countries: [], level_1: group, level_2: domain || "", level_3: null, level_4: null, state: STATES.LIBRARY, core_takeaway: "", date_added: now, date_learned: null, vault: false, synthesis: "", synthesisUpdatedAt: null, deleted: false, deletedAt: null });
   };
   return (
     <div style={{ maxWidth: 640, padding: "0 0 60px" }}>
@@ -544,7 +584,7 @@ function TagPicker({ selected, onChange, allTags, onCreateTag }) {
 /* ═══════════════════════════════════════════════════════
    ADD / EDIT — cascading domain→category→subcategory
    ═══════════════════════════════════════════════════════ */
-function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, allTags, onCreateTag }) {
+function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, allTags, onCreateTag, uploadToStorage }) {
   const tax = useTaxonomy();
   const isEdit = !!item;
   const [type, setType] = useState(item?.type || (PODCAST_DOMAINS.includes(initDomain) ? "Video" : "Article"));
@@ -571,14 +611,13 @@ function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, all
     if (needsCountries && countries.length === 0) { setCountryErr("At least one country is required."); return; }
     setCountryErr("");
     let state;
-    if (isEdit && item.state === STATES.VAULT) state = STATES.VAULT;
-    else if (isEdit && item.state === STATES.LEARNED) state = STATES.LEARNED;
+    if (isEdit && item.state === STATES.LEARNED) state = STATES.LEARNED;
     else if (title.trim() && domain) state = STATES.LIBRARY;
     else state = STATES.WANT;
     const wasL = item?.state === STATES.LEARNED;
     const trans = state === STATES.LEARNED && !wasL;
     const now = new Date().toISOString();
-    onSave({ id: item?.id || genId(), ownerId: item?.ownerId || "local", createdAt: item?.createdAt || now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type: isPodcast ? "Video" : type, title: title.trim(), content, image_url: type === "Chart" ? image_url : "", source, tags, countries: needsCountries ? countries : (item?.countries || []), level_1: group, level_2: domain, level_3: cat || null, level_4: subcat || null, state, core_takeaway: item?.core_takeaway || "", date_added: item?.date_added || now, date_learned: trans ? now : (item?.date_learned || null),  synthesis: item?.synthesis || "", synthesisUpdatedAt: item?.synthesisUpdatedAt || null, deleted: false, deletedAt: null });
+    onSave({ id: item?.id || genId(), ownerId: item?.ownerId || "local", createdAt: item?.createdAt || now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type: isPodcast ? "Video" : type, title: title.trim(), content, image_url: type === "Chart" ? image_url : "", source, tags, countries: needsCountries ? countries : (item?.countries || []), level_1: group, level_2: domain, level_3: cat || null, level_4: subcat || null, state, core_takeaway: item?.core_takeaway || "", date_added: item?.date_added || now, date_learned: trans ? now : (item?.date_learned || null),  vault: item?.vault || false, synthesis: item?.synthesis || "", synthesisUpdatedAt: item?.synthesisUpdatedAt || null, deleted: false, deletedAt: null });
   };
   const lbl = { fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 8, display: "block" };
   const inp = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "11px 13px", color: TEXT, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
@@ -594,7 +633,7 @@ function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, all
         {subcatKeys.length > 0 && <div><label style={lbl}>Subcategory</label><select style={sel} value={subcat} onChange={e => setSubcat(e.target.value)}><option value="">— None —</option>{subcatKeys.map(k => <option key={k} value={k}>{k}</option>)}</select></div>}
         {needsCountries && <div><label style={lbl}>Countries</label><CountryPicker selected={countries} onChange={c => { setCountries(c); if (c.length > 0) setCountryErr(""); }} />{countryErr && <div style={{ fontSize: 11, color: "#c44", marginTop: 6 }}>{countryErr}</div>}</div>}
         {type !== "Chart" && <div><label style={lbl}>Link</label><input style={inp} value={content} onChange={e => setContent(e.target.value)} /></div>}
-        {type === "Chart" && <ChartUpload value={image_url} onChange={setImgUrl} lbl={lbl} />}
+        {type === "Chart" && <ChartUpload value={image_url} onChange={setImgUrl} lbl={lbl} uploadToStorage={uploadToStorage} />}
         <div><label style={lbl}>Author</label><input style={inp} value={source} onChange={e => setSource(e.target.value)} /></div>
         <div><label style={lbl}>Tags</label><TagPicker selected={tags} onChange={setTags} allTags={allTags} onCreateTag={onCreateTag} /></div>
         <div style={{ display: "flex", gap: 10, marginTop: 6 }}><button onClick={save} style={{ flex: 1, padding: "13px 0", fontSize: 14, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: ACCENT, color: "#111", cursor: "pointer" }}>Save</button><button onClick={onCancel} style={{ flex: 1, padding: "13px 0", fontSize: 14, fontWeight: 500, fontFamily: "inherit", borderRadius: 5, border: `1px solid ${BORDER}`, background: "transparent", color: TEXT_DIM, cursor: "pointer" }}>Cancel</button></div>
@@ -610,7 +649,7 @@ function ItemDetail({ item, onBack, onEdit, onDelete, onMoveVault, onMoveLearned
   const [showImg, setShowImg] = useState(false); const [synthText, setSynthText] = useState(item.synthesis || ""); const [editing, setEditing] = useState(false); const [error, setError] = useState(""); const [showDeleteConfirm, setShowDeleteConfirm] = useState(false); const synthTimer = useRef(null);
   const bp = [item.level_2, item.level_3, item.level_4].filter(Boolean).join(" \u2192 ");
   const isLearned = item.state === STATES.LEARNED;
-  const isVault = item.state === STATES.VAULT;
+  const isVault = !!item.vault;
   const isLibrary = item.state === STATES.LIBRARY || item.state === STATES.WANT;
   useEffect(() => { setSynthText(item.synthesis || ""); setEditing(false); setError(""); }, [item.id, item.synthesis]);
   const handleDraftChange = (val) => { setSynthText(val); setError(""); if (synthTimer.current) clearTimeout(synthTimer.current); synthTimer.current = setTimeout(() => { onSynthesisChange(item.id, val); }, 800); };
@@ -631,7 +670,7 @@ function ItemDetail({ item, onBack, onEdit, onDelete, onMoveVault, onMoveLearned
         </div>
       </div>
       {item.type === "Chart" && item.image_url && <div onClick={() => setShowImg(true)} style={{ cursor: "pointer", margin: "8px 0 20px", borderRadius: 6, overflow: "hidden", background: "#080808" }}><img src={item.image_url} alt={item.title} style={{ width: "100%", display: "block", maxHeight: 400, objectFit: "contain" }} /></div>}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}><Badge state={item.state} /><span style={{ fontSize: 11, color: TEXT_DIM }}>{item.type}</span><span style={{ color: TEXT_MUTED, fontSize: 11 }}>&middot;</span><span style={{ fontSize: 11, color: TEXT_DIM }}>{bp}</span></div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}><Badge state={item.state} vault={item.vault} /><span style={{ fontSize: 11, color: TEXT_DIM }}>{item.type}</span><span style={{ color: TEXT_MUTED, fontSize: 11 }}>&middot;</span><span style={{ fontSize: 11, color: TEXT_DIM }}>{bp}</span></div>
       <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em", margin: "0 0 14px", lineHeight: 1.3, color: TEXT }}>{item.title}</h1>
       {item.source && <div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 10 }}>{item.source}</div>}
       {item.countries?.length > 0 && <div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 10 }}>Countries: {item.countries.join(", ")}</div>}
@@ -640,10 +679,10 @@ function ItemDetail({ item, onBack, onEdit, onDelete, onMoveVault, onMoveLearned
       <div style={{ borderTop: `1px solid ${SEPARATOR}`, marginTop: 16, paddingTop: 16 }}>
         <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 10 }}>Synthesis</div>
         {isLibrary && (<><textarea value={synthText} onChange={e => handleDraftChange(e.target.value)} style={taS} />{item.synthesisUpdatedAt && <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 6 }}>Draft saved</div>}{error && <div style={{ fontSize: 11, color: "#c44", marginTop: 8 }}>{error}</div>}<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button onClick={handleSubmit} style={btnS(true)}>Submit &amp; mark as learned</button><button onClick={onMoveVault} style={vaultBtnS}>Move to Vault</button></div></>)}
-        {isLearned && !editing && (<>{synthText ? <div style={{ fontSize: 13, lineHeight: 1.65, color: TEXT, whiteSpace: "pre-wrap" }}>{synthText}</div> : <div style={{ fontSize: 12, color: TEXT_MUTED }}>No synthesis written.</div>}<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button onClick={() => setEditing(true)} style={btnS(false)}>Edit Synthesis</button><button onClick={onMoveVault} style={vaultBtnS}>Move to Vault</button></div></>)}
+        {isLearned && !editing && (<>{synthText ? <div style={{ fontSize: 13, lineHeight: 1.65, color: TEXT, whiteSpace: "pre-wrap" }}>{synthText}</div> : <div style={{ fontSize: 12, color: TEXT_MUTED }}>No synthesis written.</div>}<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button onClick={() => setEditing(true)} style={btnS(false)}>Edit Synthesis</button>{isVault ? <button onClick={onMoveVault} style={btnS(false)}>Remove from Vault</button> : <button onClick={onMoveVault} style={vaultBtnS}>Add to Vault</button>}</div></>)}
         {isLearned && editing && (<><textarea value={synthText} onChange={e => { setSynthText(e.target.value); setError(""); }} style={taS} />{error && <div style={{ fontSize: 11, color: "#c44", marginTop: 8 }}>{error}</div>}<div style={{ display: "flex", gap: 8, marginTop: 10 }}><button onClick={handleSaveEdit} style={btnS(true)}>Save Changes</button><button onClick={() => { setEditing(false); setSynthText(item.synthesis || ""); setError(""); }} style={btnS(false)}>Cancel</button></div></>)}
-        {isVault && !editing && (<>{synthText ? <div style={{ fontSize: 13, lineHeight: 1.65, color: TEXT, whiteSpace: "pre-wrap" }}>{synthText}</div> : <div style={{ fontSize: 12, color: TEXT_MUTED }}>No synthesis written.</div>}<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button onClick={() => setEditing(true)} style={btnS(false)}>Edit Synthesis</button><button onClick={onMoveLearned} style={btnS(false)}>Move to Learned</button></div></>)}
-        {isVault && editing && (<><textarea value={synthText} onChange={e => { setSynthText(e.target.value); setError(""); }} style={taS} />{error && <div style={{ fontSize: 11, color: "#c44", marginTop: 8 }}>{error}</div>}<div style={{ display: "flex", gap: 8, marginTop: 10 }}><button onClick={handleSaveEdit} style={btnS(true)}>Save Changes</button><button onClick={() => { setEditing(false); setSynthText(item.synthesis || ""); setError(""); }} style={btnS(false)}>Cancel</button></div></>)}
+
+
       </div>
     </div>
   );
@@ -675,7 +714,7 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isVault, co
   }, [initDomain]);
 
   const active = items.filter(i => !i.deleted);
-  const pool = isVault ? active.filter(i => i.state === STATES.VAULT) : isLearned ? active.filter(i => i.state === STATES.LEARNED) : active.filter(i => i.state !== STATES.LEARNED && i.state !== STATES.VAULT);
+  const pool = isVault ? active.filter(i => i.vault && i.state === STATES.LEARNED) : isLearned ? active.filter(i => i.state === STATES.LEARNED) : active.filter(i => i.state !== STATES.LEARNED);
 
   const go = (lv, d, c, s, t) => {
     internalNav.current = true;
@@ -777,7 +816,7 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isVault, co
     if (contentType === "Chart") {
       return (<div><PageHeader title="Charts" subtitle={`${fl.length} items`} backLabel={backLabel} onBack={() => go(backLevel, domain, cat, subcat)} /><SortBar mode={typeSortKey} onChange={toggleSort} />{fl.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No charts yet</div>}<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{sorted.map(it => (<div key={it.id} onClick={() => onNav("detail", it.id)} style={{ cursor: "pointer" }}>{it.image_url ? <div style={{ borderRadius: 5, overflow: "hidden", background: "#080808", aspectRatio: "4/3" }}><img src={it.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /></div> : <div style={{ borderRadius: 5, background: "#141414", aspectRatio: "4/3", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: 11, color: TEXT_MUTED }}>No image</span></div>}<div style={{ fontSize: 12, fontWeight: 500, color: TEXT, marginTop: 6, lineHeight: 1.3 }}>{it.title}</div><div style={{ fontSize: 10, color: TEXT_DIM, marginTop: 2 }}><Badge state={it.state} /></div></div>))}</div></div>);
     }
-    return (<div><PageHeader title={(contentType || "All") + "s"} subtitle={`${fl.length} items`} backLabel={backLabel} onBack={() => go(backLevel, domain, cat, subcat)} /><SortBar mode={typeSortKey} onChange={toggleSort} />{fl.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No items</div>}{sorted.map((it, idx) => <ListRow key={it.id} title={it.title} right={<Badge state={it.state} />} onClick={() => onNav("detail", it.id)} noBorder={idx === sorted.length - 1} />)}</div>);
+    return (<div><PageHeader title={(contentType || "All") + "s"} subtitle={`${fl.length} items`} backLabel={backLabel} onBack={() => go(backLevel, domain, cat, subcat)} /><SortBar mode={typeSortKey} onChange={toggleSort} />{fl.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No items</div>}{sorted.map((it, idx) => <ListRow key={it.id} title={it.title} right={<Badge state={it.state} vault={it.vault} />} onClick={() => onNav("detail", it.id)} noBorder={idx === sorted.length - 1} />)}</div>);
   }
   return null;
 }
@@ -808,7 +847,7 @@ function RecentView({ items, onNav }) {
       const path = [it.level_2, it.level_3, it.level_4].filter(Boolean).join(" \u2192 ");
       const ago = (() => { const ms = Date.now() - new Date(it.date_added || it.createdAt).getTime(); const m = Math.floor(ms / 60000); if (m < 60) return m + "m ago"; const h = Math.floor(m / 60); if (h < 24) return h + "h ago"; const d = Math.floor(h / 24); return d + "d ago"; })();
       const m = [path || "Uncategorized", it.type, ago].filter(Boolean).join(" \u2022 ");
-      return <ListRow key={it.id} title={it.title} meta={m} right={<Badge state={it.state} />} onClick={() => onNav("detail", it.id)} noBorder={idx === recent.length - 1} />;
+      return <ListRow key={it.id} title={it.title} meta={m} right={<Badge state={it.state} vault={it.vault} />} onClick={() => onNav("detail", it.id)} noBorder={idx === recent.length - 1} />;
     })}
   </div>);
 }
@@ -835,7 +874,7 @@ function TypeRowsOrFlat({ items, flatSort, onToggleSort, onTypeClick, onItemClic
     return (<div>
       <SortBar mode={flatSort} onChange={onToggleSort} />
       {sorted.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No items</div>}
-      {sorted.map((it, idx) => <ListRow key={it.id} title={it.title} meta={it.type} right={<Badge state={it.state} />} onClick={() => onItemClick(it.id)} noBorder={idx === sorted.length - 1} compact={compact} />)}
+      {sorted.map((it, idx) => <ListRow key={it.id} title={it.title} meta={it.type} right={<Badge state={it.state} vault={it.vault} />} onClick={() => onItemClick(it.id)} noBorder={idx === sorted.length - 1} compact={compact} />)}
     </div>);
   }
   const typeRows = types.map(t => ({ type: t, count: items.filter(i => i.type === t).length }));
@@ -932,7 +971,7 @@ function Sidebar({ view, activeDomain, onNav, items }) {
   const isVlt = view === "vault";
   useEffect(() => { if (isVlt) setVaultOpen(true); }, [isVlt]);
   const si = (active, indent) => ({ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px 8px " + (16 + (indent||0)) + "px", color: active ? ACCENT : TEXT_DIM, fontSize: (indent||0) > 0 ? 12.5 : 13, fontWeight: active ? 600 : 400, cursor: "pointer", background: "transparent", borderLeft: active ? "2px solid " + ACCENT : "2px solid transparent", transition: "all 0.15s", whiteSpace: "nowrap" });
-  const ct = (n) => <span style={{ fontSize: 10, color: TEXT_MUTED, fontWeight: 400, marginLeft: 2 }}>({n})</span>;
+  const ct = (n) => n > 0 ? <span style={{ fontSize: 12, color: "#888", fontWeight: 400, marginLeft: 4 }}>({n})</span> : null;
   const isLib = view === "library";
   const isLrn = view === "learned";
   return (
@@ -975,7 +1014,7 @@ function MobileSidebar({ view, activeDomain, onNav, items }) {
   const isVlt = view === "vault";
   useEffect(() => { if (isVlt) setVaultOpen(true); }, [isVlt]);
   const si = (active, indent) => ({ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px 7px " + (10 + (indent||0)) + "px", color: active ? ACCENT : TEXT_DIM, fontSize: (indent||0) > 0 ? 10.5 : 11, fontWeight: active ? 600 : 400, cursor: "pointer", background: "transparent", borderLeft: active ? "2px solid " + ACCENT : "2px solid transparent", transition: "all 0.15s", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
-  const ct = (n) => <span style={{ fontSize: 9, color: TEXT_MUTED, fontWeight: 400, marginLeft: 2 }}>({n})</span>;
+  const ct = (n) => n > 0 ? <span style={{ fontSize: 10, color: "#888", fontWeight: 400, marginLeft: 3 }}>({n})</span> : null;
   const isLib = view === "library";
   const isLrn = view === "learned";
   return (
@@ -1039,16 +1078,18 @@ function TheArchiveProduction() {
   
   if (!loaded || !prefs) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e0e",color:"#777",fontSize:14 }}>Loading data...</div>;
 
+  const uploadToStorage = useUploadToStorage();
   return <TheArchiveInner 
     initialItems={firestoreItems} 
     fsSave={fsSave} 
     fsSaveBatch={saveBatch}
     initialPrefs={prefs}
     updatePrefs={updatePrefs}
+    uploadToStorage={uploadToStorage}
   />;
 }
 
-function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, updatePrefs }) {
+function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, updatePrefs, uploadToStorage }) {
   // Items come from Firestore via onSnapshot — we mirror them locally for instant UI
   const [items, setItems] = useState(initialItems);
   
@@ -1148,23 +1189,18 @@ function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, upda
   };
   const handleMoveVault = (id) => {
     const now = new Date().toISOString();
+    let didLearn = false;
     setItems(prev => prev.map(i => {
       if (i.id !== id) return i;
-      const updated = { ...i, state: STATES.VAULT, updatedAt: now };
+      const toggled = !i.vault;
+      const updated = { ...i, vault: toggled, updatedAt: now };
+      if (toggled && i.state !== STATES.LEARNED) { updated.state = STATES.LEARNED; updated.date_learned = i.date_learned || now; didLearn = true; }
       persistItem(updated);
       return updated;
     }));
+    if (didLearn) setStreak(prev => recordLearned(resolveStreak(prev)));
   };
-  const handleMoveLearned = (id) => {
-    const now = new Date().toISOString();
-    setItems(prev => prev.map(i => {
-      if (i.id !== id) return i;
-      const updated = { ...i, state: STATES.LEARNED, date_learned: i.date_learned || now, updatedAt: now };
-      persistItem(updated);
-      return updated;
-    }));
-    setStreak(prev => recordLearned(resolveStreak(prev)));
-  };
+  const handleMoveLearned = (id) => { handleMoveVault(id); };
   const activeItem = items.find(i => i.id === itemId);
 
   const handleAddTax = (spec) => { setCatModal(spec); };
@@ -1249,8 +1285,8 @@ function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, upda
       case "bulkmove": return <BulkMoveView items={items} onMove={handleBulkMove} onBack={() => setView("settings")} />;
       case "detail": return activeItem ? <ItemDetail item={activeItem} onBack={goBackDetail} onEdit={() => nav("edit", activeItem)} onDelete={handleDelete} onMoveVault={() => handleMoveVault(activeItem.id)} onMoveLearned={() => handleMoveLearned(activeItem.id)} onSynthesisChange={handleSynthesis} onMarkLearned={handleMarkLearned} /> : null;
       case "quickadd": return <QuickAdd onSave={handleSave} onCancel={() => setView(prevView || "library")} />;
-      case "add": return <AddEditPage initDomain={addInit.domain} initCat={addInit.cat} initSub={addInit.subcat} onSave={handleSave} onCancel={() => setView(prevView || "library")} allTags={allTags} onCreateTag={handleCreateTag} />;
-      case "edit": return editItem ? <AddEditPage item={editItem} onSave={handleSave} onCancel={() => setView("detail")} allTags={allTags} onCreateTag={handleCreateTag} /> : null;
+      case "add": return <AddEditPage initDomain={addInit.domain} initCat={addInit.cat} initSub={addInit.subcat} onSave={handleSave} onCancel={() => setView(prevView || "library")} allTags={allTags} onCreateTag={handleCreateTag} uploadToStorage={uploadToStorage} />;
+      case "edit": return editItem ? <AddEditPage item={editItem} onSave={handleSave} onCancel={() => setView("detail")} allTags={allTags} onCreateTag={handleCreateTag} uploadToStorage={uploadToStorage} /> : null;
       default: return null;
     }
   };
