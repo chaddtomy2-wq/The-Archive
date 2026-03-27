@@ -18,7 +18,7 @@ input, select, textarea, button { font-family: inherit; }
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
 <!-- React (UMD) + Babel -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -48,6 +48,7 @@ const firebaseConfig = {
 const fbApp = firebase.initializeApp(firebaseConfig);
 const auth = fbApp.auth();
 const db = fbApp.firestore();
+const storage = fbApp.storage();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
 function signIn() {
@@ -148,26 +149,17 @@ function useFirestorePrefs() {
 }
 
 /* ═══════════════════════════════════════════════════════
-   CLOUDINARY — chart image uploads
+   FIREBASE STORAGE — chart image uploads
    ═══════════════════════════════════════════════════════ */
-const CLOUDINARY_CLOUD = "dam4mt25e";
-const CLOUDINARY_PRESET = "The Archive";
-
 function useUploadToStorage() {
   const user = useUser();
   return useCallback(async (file) => {
     if (!user) throw new Error("Not authenticated");
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", CLOUDINARY_PRESET);
-    formData.append("folder", "the-archive/" + user.uid);
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, {
-      method: "POST",
-      body: formData
-    });
-    if (!res.ok) throw new Error("Cloudinary upload failed: " + res.status);
-    const data = await res.json();
-    return data.secure_url;
+    const ext = file.name.split(".").pop() || "jpg";
+    const filename = "chart_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7) + "." + ext;
+    const ref = storage.ref("users/" + user.uid + "/media/" + filename);
+    await ref.put(file);
+    return await ref.getDownloadURL();
   }, [user]);
 }
 
@@ -191,8 +183,7 @@ const SEPARATOR = "#1a1a1a";
    CONSTANTS & DATA MODEL
    ═══════════════════════════════════════════════════════ */
 const STATES = { WANT: "Want to Learn", LIBRARY: "Library", LEARNED: "Learned" };
-const TYPES = ["Article", "Tweet", "Video", "Chart", "Image"];
-const VISUAL_TYPES = ["Chart", "Image"];
+const TYPES = ["Article", "Tweet", "Video", "Chart"];
 
 /*  Unified default domains — every domain is a peer.
     group: "Professional" | "Personal" (for sidebar grouping only)
@@ -303,7 +294,6 @@ function migrateItems(rawItems, oldSynthesis) {
     if (!m.schemaVersion) m.schemaVersion = 1;
     if (m.deleted === undefined) m.deleted = false;
     if (m.deletedAt === undefined) m.deletedAt = null;
-    if (m.threads === undefined) m.threads = [];
     if (!m.synthesis && oldSynthesis && oldSynthesis[m.id]) {
       m.synthesis = oldSynthesis[m.id].text || "";
       m.synthesisUpdatedAt = oldSynthesis[m.id].updated || null;
@@ -422,8 +412,6 @@ const DownloadIcon = ({ size = 16, color = TEXT_DIM }) => <Svg size={size}><path
 const SettingsIcon = ({ size = 18, color = TEXT_DIM }) => <Svg size={size}><circle cx="12" cy="12" r="3" stroke={color}/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke={color}/></Svg>;
 const FireIcon = ({ size = 16, color = "#e8590c" }) => <Svg size={size}><path d="M12 12c2-2.96 0-7-1-8 0 3.038-1.773 4.741-3 6-1.226 1.26-2 3.24-2 5a6 6 0 1012 0c0-1.532-1.056-3.94-2-5-1.786 3-2 2-4 2z" stroke={color} fill={color} strokeWidth={1.2}/></Svg>;
 const ClockIcon = ({ size = 18, color = TEXT_DIM }) => <Svg size={size}><circle cx="12" cy="12" r="10" stroke={color}/><path d="M12 6v6l4 2" stroke={color}/></Svg>;
-const ThreadIcon = ({ size = 14, color = ACCENT }) => <Svg size={size}><circle cx="5" cy="12" r="2" stroke={color}/><circle cx="19" cy="5" r="2" stroke={color}/><circle cx="19" cy="19" r="2" stroke={color}/><path d="M7 12h4a2 2 0 002-2V7" stroke={color}/><path d="M7 12h4a2 2 0 012 2v5" stroke={color}/></Svg>;
-const ImageGridIcon = ({ size = 18, color = TEXT_DIM }) => <Svg size={size}><rect x="3" y="3" width="7" height="7" rx="1" stroke={color}/><rect x="14" y="3" width="7" height="7" rx="1" stroke={color}/><rect x="3" y="14" width="7" height="7" rx="1" stroke={color}/><rect x="14" y="14" width="7" height="7" rx="1" stroke={color}/></Svg>;
 
 /* ═══════════════════════════════════════════════════════
    IMAGE MODAL
@@ -629,7 +617,7 @@ function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, all
     const wasL = item?.state === STATES.LEARNED;
     const trans = state === STATES.LEARNED && !wasL;
     const now = new Date().toISOString();
-    onSave({ id: item?.id || genId(), ownerId: item?.ownerId || "local", createdAt: item?.createdAt || now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type: isPodcast ? "Video" : type, title: title.trim(), content, image_url: VISUAL_TYPES.includes(type) ? image_url : "", source, tags, countries: needsCountries ? countries : (item?.countries || []), level_1: group, level_2: domain, level_3: cat || null, level_4: subcat || null, state, core_takeaway: item?.core_takeaway || "", date_added: item?.date_added || now, date_learned: trans ? now : (item?.date_learned || null),  vault: item?.vault || false, synthesis: item?.synthesis || "", synthesisUpdatedAt: item?.synthesisUpdatedAt || null, deleted: false, deletedAt: null });
+    onSave({ id: item?.id || genId(), ownerId: item?.ownerId || "local", createdAt: item?.createdAt || now, updatedAt: now, schemaVersion: SCHEMA_VERSION, type: isPodcast ? "Video" : type, title: title.trim(), content, image_url: type === "Chart" ? image_url : "", source, tags, countries: needsCountries ? countries : (item?.countries || []), level_1: group, level_2: domain, level_3: cat || null, level_4: subcat || null, state, core_takeaway: item?.core_takeaway || "", date_added: item?.date_added || now, date_learned: trans ? now : (item?.date_learned || null),  vault: item?.vault || false, synthesis: item?.synthesis || "", synthesisUpdatedAt: item?.synthesisUpdatedAt || null, deleted: false, deletedAt: null });
   };
   const lbl = { fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM, marginBottom: 8, display: "block" };
   const inp = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "11px 13px", color: TEXT, fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
@@ -644,8 +632,8 @@ function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, all
         {catKeys.length > 0 && <div><label style={lbl}>Category</label><select style={sel} value={cat} onChange={e => { setCat(e.target.value); setSubcat(""); }}><option value="">— None —</option>{catKeys.map(k => <option key={k} value={k}>{k}</option>)}</select></div>}
         {subcatKeys.length > 0 && <div><label style={lbl}>Subcategory</label><select style={sel} value={subcat} onChange={e => setSubcat(e.target.value)}><option value="">— None —</option>{subcatKeys.map(k => <option key={k} value={k}>{k}</option>)}</select></div>}
         {needsCountries && <div><label style={lbl}>Countries</label><CountryPicker selected={countries} onChange={c => { setCountries(c); if (c.length > 0) setCountryErr(""); }} />{countryErr && <div style={{ fontSize: 11, color: "#c44", marginTop: 6 }}>{countryErr}</div>}</div>}
-        {!VISUAL_TYPES.includes(type) && <div><label style={lbl}>Link</label><input style={inp} value={content} onChange={e => setContent(e.target.value)} /></div>}
-        {VISUAL_TYPES.includes(type) && <ChartUpload value={image_url} onChange={setImgUrl} lbl={lbl} uploadToStorage={uploadToStorage} />}
+        {type !== "Chart" && <div><label style={lbl}>Link</label><input style={inp} value={content} onChange={e => setContent(e.target.value)} /></div>}
+        {type === "Chart" && <ChartUpload value={image_url} onChange={setImgUrl} lbl={lbl} uploadToStorage={uploadToStorage} />}
         <div><label style={lbl}>Author</label><input style={inp} value={source} onChange={e => setSource(e.target.value)} /></div>
         <div><label style={lbl}>Tags</label><TagPicker selected={tags} onChange={setTags} allTags={allTags} onCreateTag={onCreateTag} /></div>
         <div style={{ display: "flex", gap: 10, marginTop: 6 }}><button onClick={save} style={{ flex: 1, padding: "13px 0", fontSize: 14, fontWeight: 600, fontFamily: "inherit", borderRadius: 5, border: "none", background: ACCENT, color: "#111", cursor: "pointer" }}>Save</button><button onClick={onCancel} style={{ flex: 1, padding: "13px 0", fontSize: 14, fontWeight: 500, fontFamily: "inherit", borderRadius: 5, border: `1px solid ${BORDER}`, background: "transparent", color: TEXT_DIM, cursor: "pointer" }}>Cancel</button></div>
@@ -655,62 +643,14 @@ function AddEditPage({ item, initDomain, initCat, initSub, onSave, onCancel, all
 }
 
 /* ═══════════════════════════════════════════════════════
-   THREAD PICKER — search and link items
-   ═══════════════════════════════════════════════════════ */
-function ThreadPicker({ currentId, allItems, selected, onChange, onClose }) {
-  const [query, setQuery] = useState("");
-  const active = allItems.filter(i => !i.deleted && i.id !== currentId);
-  const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return active.slice(0, 20);
-    return active.filter(i => (i.title || "").toLowerCase().includes(q) || (i.level_2 || "").toLowerCase().includes(q)).slice(0, 20);
-  }, [query, active]);
-  const toggle = (id) => onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id]);
-  const inp = { width: "100%", background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "10px 13px", color: TEXT, fontSize: 13, outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 1000, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div style={{ background: "#1a1a1a", border: `1px solid ${BORDER}`, borderRadius: "12px 12px 0 0", width: "100%", maxWidth: 640, maxHeight: "75vh", display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 16px 12px" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: TEXT, letterSpacing: "-0.01em" }}>Add to Thread</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: TEXT_DIM, fontSize: 13, fontFamily: "inherit" }}>Done</button>
-        </div>
-        <div style={{ padding: "0 16px 12px" }}>
-          <input style={inp} value={query} onChange={e => setQuery(e.target.value)} placeholder="Search items…" autoFocus />
-        </div>
-        <div style={{ overflowY: "auto", flex: 1, padding: "0 16px 24px" }}>
-          {results.map((it, idx) => {
-            const isSelected = selected.includes(it.id);
-            const path = [it.level_2, it.level_3].filter(Boolean).join(" → ");
-            return (
-              <div key={it.id} onClick={() => toggle(it.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: idx < results.length - 1 ? `1px solid ${SEPARATOR}` : "none", cursor: "pointer" }}>
-                <div style={{ width: 18, height: 18, borderRadius: 3, border: isSelected ? "none" : `1.5px solid ${TEXT_MUTED}`, background: isSelected ? ACCENT : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  {isSelected && <span style={{ color: "#111", fontSize: 11, fontWeight: 700, lineHeight: 1 }}>✓</span>}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: isSelected ? ACCENT : TEXT, lineHeight: 1.3 }}>{it.title}</div>
-                  <div style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>{path} · {it.type}</div>
-                </div>
-              </div>
-            );
-          })}
-          {results.length === 0 && <div style={{ fontSize: 13, color: TEXT_DIM, padding: "20px 0" }}>No items found</div>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════
    ITEM DETAIL
    ═══════════════════════════════════════════════════════ */
-function ItemDetail({ item, allItems, onBack, onEdit, onDelete, onMoveVault, onMoveLearned, onSynthesisChange, onMarkLearned, onThreadsChange, onNavToItem }) {
-  const [showImg, setShowImg] = useState(false); const [synthText, setSynthText] = useState(item.synthesis || ""); const [editing, setEditing] = useState(false); const [error, setError] = useState(""); const [showDeleteConfirm, setShowDeleteConfirm] = useState(false); const [showThreadPicker, setShowThreadPicker] = useState(false); const synthTimer = useRef(null);
+function ItemDetail({ item, onBack, onEdit, onDelete, onMoveVault, onMoveLearned, onSynthesisChange, onMarkLearned }) {
+  const [showImg, setShowImg] = useState(false); const [synthText, setSynthText] = useState(item.synthesis || ""); const [editing, setEditing] = useState(false); const [error, setError] = useState(""); const [showDeleteConfirm, setShowDeleteConfirm] = useState(false); const synthTimer = useRef(null);
   const bp = [item.level_2, item.level_3, item.level_4].filter(Boolean).join(" \u2192 ");
   const isLearned = item.state === STATES.LEARNED;
   const isVault = !!item.vault;
   const isLibrary = item.state === STATES.LIBRARY || item.state === STATES.WANT;
-  const threads = item.threads || [];
-  const threadItems = allItems.filter(i => threads.includes(i.id) && !i.deleted);
   useEffect(() => { setSynthText(item.synthesis || ""); setEditing(false); setError(""); }, [item.id, item.synthesis]);
   const handleDraftChange = (val) => { setSynthText(val); setError(""); if (synthTimer.current) clearTimeout(synthTimer.current); synthTimer.current = setTimeout(() => { onSynthesisChange(item.id, val); }, 800); };
   const handleSubmit = () => { if (!synthText.trim()) { setError("Synthesis cannot be empty."); return; } onSynthesisChange(item.id, synthText.trim()); onMarkLearned(item.id); setEditing(false); setError(""); };
@@ -722,7 +662,6 @@ function ItemDetail({ item, allItems, onBack, onEdit, onDelete, onMoveVault, onM
     <div style={{ maxWidth: 640, paddingBottom: 60 }}>
       {showImg && item.image_url && <ImageModal src={item.image_url} onClose={() => setShowImg(false)} />}
       {showDeleteConfirm && <ConfirmModal message={`Delete "${item.title}"?`} confirmLabel="Delete" onConfirm={() => { setShowDeleteConfirm(false); onDelete(item.id); }} onCancel={() => setShowDeleteConfirm(false)} />}
-      {showThreadPicker && <ThreadPicker currentId={item.id} allItems={allItems} selected={threads} onChange={(newThreads) => onThreadsChange(item.id, newThreads)} onClose={() => setShowThreadPicker(false)} />}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 0 8px" }}>
         <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: TEXT_DIM, fontSize: 13, fontFamily: "inherit", padding: 0 }}><ChevL size={14} /> Back</button>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -730,7 +669,7 @@ function ItemDetail({ item, allItems, onBack, onEdit, onDelete, onMoveVault, onM
           <button onClick={onEdit} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: ACCENT, fontSize: 13, fontFamily: "inherit", padding: 0 }}><EditI size={12} /> Edit</button>
         </div>
       </div>
-      {VISUAL_TYPES.includes(item.type) && item.image_url && <div onClick={() => setShowImg(true)} style={{ cursor: "pointer", margin: "8px 0 20px", borderRadius: 6, overflow: "hidden", background: "#080808" }}><img src={item.image_url} alt={item.title} style={{ width: "100%", display: "block", maxHeight: 400, objectFit: "contain" }} /></div>}
+      {item.type === "Chart" && item.image_url && <div onClick={() => setShowImg(true)} style={{ cursor: "pointer", margin: "8px 0 20px", borderRadius: 6, overflow: "hidden", background: "#080808" }}><img src={item.image_url} alt={item.title} style={{ width: "100%", display: "block", maxHeight: 400, objectFit: "contain" }} /></div>}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}><Badge state={item.state} vault={item.vault} /><span style={{ fontSize: 11, color: TEXT_DIM }}>{item.type}</span><span style={{ color: TEXT_MUTED, fontSize: 11 }}>&middot;</span><span style={{ fontSize: 11, color: TEXT_DIM }}>{bp}</span></div>
       <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em", margin: "0 0 14px", lineHeight: 1.3, color: TEXT }}>{item.title}</h1>
       {item.source && <div style={{ fontSize: 12, color: TEXT_DIM, marginBottom: 10 }}>{item.source}</div>}
@@ -742,28 +681,8 @@ function ItemDetail({ item, allItems, onBack, onEdit, onDelete, onMoveVault, onM
         {isLibrary && (<><textarea value={synthText} onChange={e => handleDraftChange(e.target.value)} style={taS} />{item.synthesisUpdatedAt && <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 6 }}>Draft saved</div>}{error && <div style={{ fontSize: 11, color: "#c44", marginTop: 8 }}>{error}</div>}<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button onClick={handleSubmit} style={btnS(true)}>Submit &amp; mark as learned</button><button onClick={onMoveVault} style={vaultBtnS}>Move to Vault</button></div></>)}
         {isLearned && !editing && (<>{synthText ? <div style={{ fontSize: 13, lineHeight: 1.65, color: TEXT, whiteSpace: "pre-wrap" }}>{synthText}</div> : <div style={{ fontSize: 12, color: TEXT_MUTED }}>No synthesis written.</div>}<div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><button onClick={() => setEditing(true)} style={btnS(false)}>Edit Synthesis</button>{isVault ? <button onClick={onMoveVault} style={btnS(false)}>Remove from Vault</button> : <button onClick={onMoveVault} style={vaultBtnS}>Add to Vault</button>}</div></>)}
         {isLearned && editing && (<><textarea value={synthText} onChange={e => { setSynthText(e.target.value); setError(""); }} style={taS} />{error && <div style={{ fontSize: 11, color: "#c44", marginTop: 8 }}>{error}</div>}<div style={{ display: "flex", gap: 8, marginTop: 10 }}><button onClick={handleSaveEdit} style={btnS(true)}>Save Changes</button><button onClick={() => { setEditing(false); setSynthText(item.synthesis || ""); setError(""); }} style={btnS(false)}>Cancel</button></div></>)}
-      </div>
-      <div style={{ borderTop: `1px solid ${SEPARATOR}`, marginTop: 20, paddingTop: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <ThreadIcon size={13} color={TEXT_DIM} />
-            <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: TEXT_DIM }}>Threads {threadItems.length > 0 ? `(${threadItems.length})` : ""}</span>
-          </div>
-          <button onClick={() => setShowThreadPicker(true)} style={{ background: "none", border: `1px solid ${ACCENT_DIM}`, borderRadius: 4, padding: "4px 10px", fontSize: 11, fontWeight: 600, color: ACCENT, cursor: "pointer", fontFamily: "inherit" }}>+ Connect</button>
-        </div>
-        {threadItems.length === 0 && <div style={{ fontSize: 12, color: TEXT_MUTED, paddingBottom: 4 }}>No threads yet. Connect ideas that build on each other.</div>}
-        {threadItems.map((t, idx) => {
-          const path = [t.level_2, t.level_3].filter(Boolean).join(" → ");
-          return (
-            <div key={t.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: idx < threadItems.length - 1 ? `1px solid ${SEPARATOR}` : "none" }}>
-              <div onClick={() => onNavToItem(t.id)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
-                <div style={{ fontSize: 13, fontWeight: 500, color: ACCENT, lineHeight: 1.3 }}>{t.title}</div>
-                <div style={{ fontSize: 11, color: TEXT_MUTED, marginTop: 2 }}>{path} · {t.type}</div>
-              </div>
-              <button onClick={() => onThreadsChange(item.id, threads.filter(id => id !== t.id))} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 8px", color: TEXT_MUTED, fontSize: 13, fontFamily: "inherit", flexShrink: 0 }}>×</button>
-            </div>
-          );
-        })}
+
+
       </div>
     </div>
   );
@@ -894,78 +813,12 @@ function DrillView({ items, onNav, onAddTax, onRenameTax, isLearned, isVault, co
     const backLevel = subcat && subcat !== "__none__" ? "subcategory" : cat && cat !== "__none__" ? "category" : "domain";
     const typeSortKey = flatSort || "added";
     const sorted = sortItems(fl, typeSortKey);
-    if (VISUAL_TYPES.includes(contentType)) {
-      return (<div><PageHeader title={contentType + "s"} subtitle={`${fl.length} items`} backLabel={backLabel} onBack={() => go(backLevel, domain, cat, subcat)} /><SortBar mode={typeSortKey} onChange={toggleSort} />{fl.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No {contentType.toLowerCase()}s yet</div>}<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{sorted.map(it => (<div key={it.id} onClick={() => onNav("detail", it.id)} style={{ cursor: "pointer" }}>{it.image_url ? <div style={{ borderRadius: 5, overflow: "hidden", background: "#080808", aspectRatio: "4/3" }}><img src={it.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /></div> : <div style={{ borderRadius: 5, background: "#141414", aspectRatio: "4/3", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: 11, color: TEXT_MUTED }}>No image</span></div>}<div style={{ fontSize: 12, fontWeight: 500, color: TEXT, marginTop: 6, lineHeight: 1.3 }}>{it.title}</div><div style={{ fontSize: 10, color: TEXT_DIM, marginTop: 2 }}><Badge state={it.state} /></div></div>))}</div></div>);
+    if (contentType === "Chart") {
+      return (<div><PageHeader title="Charts" subtitle={`${fl.length} items`} backLabel={backLabel} onBack={() => go(backLevel, domain, cat, subcat)} /><SortBar mode={typeSortKey} onChange={toggleSort} />{fl.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No charts yet</div>}<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{sorted.map(it => (<div key={it.id} onClick={() => onNav("detail", it.id)} style={{ cursor: "pointer" }}>{it.image_url ? <div style={{ borderRadius: 5, overflow: "hidden", background: "#080808", aspectRatio: "4/3" }}><img src={it.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /></div> : <div style={{ borderRadius: 5, background: "#141414", aspectRatio: "4/3", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: 11, color: TEXT_MUTED }}>No image</span></div>}<div style={{ fontSize: 12, fontWeight: 500, color: TEXT, marginTop: 6, lineHeight: 1.3 }}>{it.title}</div><div style={{ fontSize: 10, color: TEXT_DIM, marginTop: 2 }}><Badge state={it.state} /></div></div>))}</div></div>);
     }
     return (<div><PageHeader title={(contentType || "All") + "s"} subtitle={`${fl.length} items`} backLabel={backLabel} onBack={() => go(backLevel, domain, cat, subcat)} /><SortBar mode={typeSortKey} onChange={toggleSort} />{fl.length === 0 && <div style={{ padding: "40px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No items</div>}{sorted.map((it, idx) => <ListRow key={it.id} title={it.title} right={<Badge state={it.state} vault={it.vault} />} onClick={() => onNav("detail", it.id)} noBorder={idx === sorted.length - 1} />)}</div>);
   }
   return null;
-}
-
-/* ═══════════════════════════════════════════════════════
-   VISUAL GALLERY — cross-domain Charts + Images grid
-   ═══════════════════════════════════════════════════════ */
-function VisualGallery({ items, onNav }) {
-  const tax = useTaxonomy();
-  const [domainFilter, setDomainFilter] = useState("");
-  const [catFilter, setCatFilter] = useState("");
-  const [typeFilter, setTypeFilter] = useState(""); // "" = all, "Chart", "Image"
-  const [sort, setSort] = useState("added");
-
-  const visuals = useMemo(() => items.filter(i => !i.deleted && VISUAL_TYPES.includes(i.type)), [items]);
-
-  const domainObj = domainFilter ? tax.domainMap[domainFilter] : null;
-  const catKeys = domainObj ? Object.keys(domainObj.categories) : [];
-
-  const filtered = useMemo(() => {
-    let r = visuals;
-    if (domainFilter) r = r.filter(i => i.level_2 === domainFilter);
-    if (catFilter) r = r.filter(i => i.level_3 === catFilter);
-    if (typeFilter) r = r.filter(i => i.type === typeFilter);
-    return sortItems(r, sort);
-  }, [visuals, domainFilter, catFilter, typeFilter, sort]);
-
-  const sel = { background: BG_INPUT, border: `1px solid ${BORDER}`, borderRadius: 5, padding: "7px 28px 7px 10px", color: TEXT, fontSize: 12, outline: "none", fontFamily: "inherit", appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' fill='%23777' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center" };
-
-  return (
-    <div style={{ paddingBottom: 60 }}>
-      <PageHeader title="Visuals" subtitle={`${filtered.length} items`} />
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-        <select style={sel} value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
-          <option value="">All Types</option>
-          {VISUAL_TYPES.map(t => <option key={t} value={t}>{t}s</option>)}
-        </select>
-        <select style={sel} value={domainFilter} onChange={e => { setDomainFilter(e.target.value); setCatFilter(""); }}>
-          <option value="">All Domains</option>
-          {tax.domains.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
-        </select>
-        {catKeys.length > 0 && (
-          <select style={sel} value={catFilter} onChange={e => setCatFilter(e.target.value)}>
-            <option value="">All Categories</option>
-            {catKeys.map(k => <option key={k} value={k}>{k}</option>)}
-          </select>
-        )}
-        <select style={sel} value={sort} onChange={e => setSort(e.target.value)}>
-          <option value="added">Date Added</option>
-          <option value="learned">Date Learned</option>
-          <option value="alpha">A–Z</option>
-        </select>
-      </div>
-      {filtered.length === 0 && <div style={{ padding: "60px 0", fontSize: 13, color: TEXT_DIM, textAlign: "center" }}>No visuals yet</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        {filtered.map(it => (
-          <div key={it.id} onClick={() => onNav("detail", it.id)} style={{ cursor: "pointer" }}>
-            {it.image_url
-              ? <div style={{ borderRadius: 6, overflow: "hidden", background: "#080808", aspectRatio: "4/3" }}><img src={it.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} /></div>
-              : <div style={{ borderRadius: 6, background: "#141414", aspectRatio: "4/3", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ fontSize: 11, color: TEXT_MUTED }}>No image</span></div>
-            }
-            <div style={{ fontSize: 12, fontWeight: 500, color: TEXT, marginTop: 6, lineHeight: 1.3 }}>{it.title}</div>
-            <div style={{ fontSize: 10, color: TEXT_DIM, marginTop: 2 }}>{[it.level_2, it.level_3].filter(Boolean).join(" → ")} · <Badge state={it.state} /></div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -1126,9 +979,9 @@ function Sidebar({ view, activeDomain, onNav, items }) {
       <div style={{ padding: "24px 18px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}><div style={{ fontSize: 13.5, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: ACCENT }}>The Archive</div><div style={{ display: "flex", gap: 8 }}><div onClick={() => onNav("search")} style={{ cursor: "pointer", padding: 4 }}><SearchIcon size={15} color={view === "search" ? ACCENT : TEXT_DIM} /></div><div onClick={() => onNav("settings")} style={{ cursor: "pointer", padding: 4 }}><SettingsIcon size={15} color={view === "settings" ? ACCENT : TEXT_DIM} /></div></div></div>
       <div onClick={() => onNav("library")} style={si(isLib && !activeDomain, 0)}><HomeIcon size={16} color={isLib ? ACCENT : TEXT_DIM} /> Library {ct(lib._pro + lib._per + lib._pod)}</div>
       <div onClick={() => onNav("recent")} style={si(view === "recent", 0)}><ClockIcon size={16} color={view === "recent" ? ACCENT : TEXT_DIM} /> Recent</div>
-      <div onClick={() => onNav("visuals")} style={si(view === "visuals", 0)}><ImageGridIcon size={16} color={view === "visuals" ? ACCENT : TEXT_DIM} /> Visuals</div>
       {tax.podDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 0)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
-      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Professional</div>}
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Professional</div>
+      {tax.proDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 14)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
       <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "10px 16px 4px 16px" }}>Personal</div>
       {tax.perDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 14)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
       <div style={{ borderTop: "1px solid " + SEPARATOR, margin: "14px 16px" }} />
@@ -1169,7 +1022,6 @@ function MobileSidebar({ view, activeDomain, onNav, items }) {
       <div style={{ padding: "14px 10px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" }}><div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: ACCENT }}>The Archive</div><div onClick={() => onNav("search")} style={{ cursor: "pointer", padding: 2 }}><SearchIcon size={12} color={view === "search" ? ACCENT : TEXT_DIM} /></div></div>
       <div onClick={() => onNav("library")} style={si(isLib && !activeDomain, 0)}><HomeIcon size={13} color={isLib ? ACCENT : TEXT_DIM} /> <span>Library {ct(lib._pro + lib._per + lib._pod)}</span></div>
       <div onClick={() => onNav("recent")} style={si(view === "recent", 0)}><ClockIcon size={13} color={view === "recent" ? ACCENT : TEXT_DIM} /> <span>Recent</span></div>
-      <div onClick={() => onNav("visuals")} style={si(view === "visuals", 0)}><ImageGridIcon size={13} color={view === "visuals" ? ACCENT : TEXT_DIM} /> <span>Visuals</span></div>
       {tax.podDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 0)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
       <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: TEXT_MUTED, padding: "8px 10px 2px" }}>Professional</div>
       {tax.proDomains.map(d => <div key={d.name} onClick={() => onNav("library", d.name)} style={si(isLib && activeDomain === d.name, 6)}>{d.name} {ct(lib[d.name] || 0)}</div>)}
@@ -1205,7 +1057,6 @@ function BottomNav({ view, onNav, onQuickAdd, onFullAdd }) {
     <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: BG, borderTop: "1px solid " + SEPARATOR, display: "flex", height: 56, zIndex: 100, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
       <button style={bi(view === "library")} onClick={() => onNav("library")}><HomeIcon size={20} color={view === "library" ? ACCENT : TEXT_DIM} /><span>Library</span></button>
       <button style={bi(view === "search")} onClick={() => onNav("search")}><SearchIcon size={20} color={view === "search" ? ACCENT : TEXT_DIM} /><span>Search</span></button>
-      <button style={bi(view === "visuals")} onClick={() => onNav("visuals")}><ImageGridIcon size={20} color={view === "visuals" ? ACCENT : TEXT_DIM} /><span>Visuals</span></button>
       <button style={bi(view === "quickadd")} onClick={onQuickAdd}><BoltIcon size={20} color={view === "quickadd" ? ACCENT : TEXT_DIM} /><span>Quick</span></button>
       <button style={bi(view === "add")} onClick={onFullAdd}><PlusI size={20} color={view === "add" ? ACCENT : TEXT_DIM} /><span>Add</span></button>
       <button style={bi(view === "vault")} onClick={() => onNav("vault")}><StarI size={20} color={view === "vault" ? ACCENT : TEXT_DIM} fill={view === "vault" ? ACCENT : "none"} /><span>Vault</span></button>
@@ -1225,9 +1076,9 @@ function TheArchiveProduction() {
   const { items: firestoreItems, loaded, save: fsSave, saveBatch } = useFirestoreItems();
   const { prefs, update: updatePrefs } = useFirestorePrefs();
   
-  const uploadToStorage = useUploadToStorage();
-
   if (!loaded || !prefs) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e0e",color:"#777",fontSize:14 }}>Loading data...</div>;
+
+  const uploadToStorage = useUploadToStorage();
   return <TheArchiveInner 
     initialItems={firestoreItems} 
     fsSave={fsSave} 
@@ -1350,36 +1201,6 @@ function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, upda
     if (didLearn) setStreak(prev => recordLearned(resolveStreak(prev)));
   };
   const handleMoveLearned = (id) => { handleMoveVault(id); };
-  const handleThreadsChange = (id, newThreads) => {
-    const now = new Date().toISOString();
-    // Update this item's threads
-    setItems(prev => prev.map(i => {
-      if (i.id !== id) return i;
-      const updated = { ...i, threads: newThreads, updatedAt: now };
-      persistItem(updated);
-      return updated;
-    }));
-    // Bidirectional: update all linked items to also reference this id
-    const added = newThreads.filter(tid => !(items.find(i => i.id === id)?.threads || []).includes(tid));
-    const removed = ((items.find(i => i.id === id)?.threads || [])).filter(tid => !newThreads.includes(tid));
-    const toUpdate = [];
-    setItems(prev => prev.map(i => {
-      if (added.includes(i.id)) {
-        const t = [...new Set([...(i.threads || []), id])];
-        const updated = { ...i, threads: t, updatedAt: now };
-        toUpdate.push(updated);
-        return updated;
-      }
-      if (removed.includes(i.id)) {
-        const t = (i.threads || []).filter(tid => tid !== id);
-        const updated = { ...i, threads: t, updatedAt: now };
-        toUpdate.push(updated);
-        return updated;
-      }
-      return i;
-    }));
-    if (toUpdate.length > 0) fsSaveBatch(toUpdate);
-  };
   const activeItem = items.find(i => i.id === itemId);
 
   const handleAddTax = (spec) => { setCatModal(spec); };
@@ -1459,11 +1280,10 @@ function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, upda
       case "learned": return <DrillView key="lrn" items={items} onNav={nav} onAddTax={handleAddTax} onRenameTax={handleRenameTax} isLearned={true} compact={compact} streak={streak} initDomain={activeDomain} />;
       case "search": return <SearchView items={items} onNav={nav} />;
       case "recent": return <RecentView items={items} onNav={nav} />;
-      case "visuals": return <VisualGallery items={items} onNav={nav} />;
       case "settings": return <SettingsView items={items} onExport={handleExport} onImport={handleImport} onBulkMove={() => setView("bulkmove")} lastExport={lastExport} streak={streak} customTax={customTax} onRemoveCategory={handleRemoveTax} allTags={allTags} onRemoveTag={handleRemoveTag} />;
       case "vault": return <DrillView key="vault" items={items} onNav={nav} onAddTax={handleAddTax} onRenameTax={handleRenameTax} isVault={true} compact={compact} initDomain={activeDomain} />;
       case "bulkmove": return <BulkMoveView items={items} onMove={handleBulkMove} onBack={() => setView("settings")} />;
-      case "detail": return activeItem ? <ItemDetail item={activeItem} allItems={items} onBack={goBackDetail} onEdit={() => nav("edit", activeItem)} onDelete={handleDelete} onMoveVault={() => handleMoveVault(activeItem.id)} onMoveLearned={() => handleMoveLearned(activeItem.id)} onSynthesisChange={handleSynthesis} onMarkLearned={handleMarkLearned} onThreadsChange={handleThreadsChange} onNavToItem={(id) => { setPrevView(view); setView("detail"); setItemId(id); }} /> : null;
+      case "detail": return activeItem ? <ItemDetail item={activeItem} onBack={goBackDetail} onEdit={() => nav("edit", activeItem)} onDelete={handleDelete} onMoveVault={() => handleMoveVault(activeItem.id)} onMoveLearned={() => handleMoveLearned(activeItem.id)} onSynthesisChange={handleSynthesis} onMarkLearned={handleMarkLearned} /> : null;
       case "quickadd": return <QuickAdd onSave={handleSave} onCancel={() => setView(prevView || "library")} />;
       case "add": return <AddEditPage initDomain={addInit.domain} initCat={addInit.cat} initSub={addInit.subcat} onSave={handleSave} onCancel={() => setView(prevView || "library")} allTags={allTags} onCreateTag={handleCreateTag} uploadToStorage={uploadToStorage} />;
       case "edit": return editItem ? <AddEditPage item={editItem} onSave={handleSave} onCancel={() => setView("detail")} allTags={allTags} onCreateTag={handleCreateTag} uploadToStorage={uploadToStorage} /> : null;
