@@ -1224,8 +1224,6 @@ function BottomNav({ view, onNav, onQuickAdd, onFullAdd }) {
 function TheArchiveProduction() {
   const { items: firestoreItems, loaded, save: fsSave, saveBatch } = useFirestoreItems();
   const { prefs, update: updatePrefs } = useFirestorePrefs();
-  
-  const uploadToStorage = useUploadToStorage();
 
   if (!loaded || !prefs) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e0e",color:"#777",fontSize:14 }}>Loading data...</div>;
   return <TheArchiveInner 
@@ -1234,14 +1232,15 @@ function TheArchiveProduction() {
     fsSaveBatch={saveBatch}
     initialPrefs={prefs}
     updatePrefs={updatePrefs}
-    uploadToStorage={uploadToStorage}
   />;
 }
 
-function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, updatePrefs, uploadToStorage }) {
+function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, updatePrefs }) {
+  const uploadToStorage = useUploadToStorage();
+
   // Items come from Firestore via onSnapshot — we mirror them locally for instant UI
   const [items, setItems] = useState(initialItems);
-  
+
   // Sync when Firestore pushes updates (e.g. from another device)
   useEffect(() => { setItems(initialItems); }, [initialItems]);
 
