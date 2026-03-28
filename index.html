@@ -1225,9 +1225,10 @@ function TheArchiveProduction() {
   const { items: firestoreItems, loaded, save: fsSave, saveBatch } = useFirestoreItems();
   const { prefs, update: updatePrefs } = useFirestorePrefs();
 
-  if (!loaded || !prefs) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e0e",color:"#777",fontSize:14 }}>Loading data...</div>;
   return <TheArchiveInner 
-    initialItems={firestoreItems} 
+    initialItems={firestoreItems}
+    loaded={loaded}
+    prefs={prefs}
     fsSave={fsSave} 
     fsSaveBatch={saveBatch}
     initialPrefs={prefs}
@@ -1235,39 +1236,45 @@ function TheArchiveProduction() {
   />;
 }
 
-function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, updatePrefs }) {
+function TheArchiveInner({ initialItems, loaded, prefs, fsSave, fsSaveBatch, initialPrefs, updatePrefs }) {
   const uploadToStorage = useUploadToStorage();
 
-  // Items come from Firestore via onSnapshot — we mirror them locally for instant UI
+  // ALL hooks must come before any conditional returns
   const [items, setItems] = useState(initialItems);
-
-  // Sync when Firestore pushes updates (e.g. from another device)
-  useEffect(() => { setItems(initialItems); }, [initialItems]);
-
-  const [customTax, setCustomTax] = useState(initialPrefs.customTax);
+  const [customTax, setCustomTax] = useState([]);
   const taxonomy = useMemo(() => buildTaxonomy(customTax), [customTax]);
-
   const [view, setView] = useState("library");
   const [activeDomain, setActiveDomain] = useState(null);
   const [itemId, setItemId] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [addInit, setAddInit] = useState({});
   const [prevView, setPrevView] = useState("library");
-
   const [desktop, setDesktop] = useState(typeof window !== "undefined" ? window.innerWidth >= 768 : true);
-  const [lastExport, setLastExport] = useState(initialPrefs.lastExport);
-  const [streak, setStreak] = useState(() => resolveStreak(initialPrefs.streak));
+  const [lastExport, setLastExport] = useState(null);
+  const [streak, setStreak] = useState({ current: 0, longest: 0, lastLearnedDate: null });
   const [catModal, setCatModal] = useState(null);
-  const [allTags, setAllTags] = useState(initialPrefs.allTags);
+  const [allTags, setAllTags] = useState([]);
+  const [renameModal, setRenameModal] = useState(null);
+
+  // Sync when Firestore pushes updates
+  useEffect(() => { setItems(initialItems); }, [initialItems]);
+
+  // Sync prefs when they load
+  useEffect(() => {
+    if (!prefs) return;
+    setCustomTax(prefs.customTax || []);
+    setAllTags(prefs.allTags || []);
+    setStreak(resolveStreak(prefs.streak || { current: 0, longest: 0, lastLearnedDate: null }));
+    setLastExport(prefs.lastExport || null);
+  }, [!!prefs]);
 
   // Persist prefs to Firestore when they change
-  useEffect(() => { updatePrefs({ customTax }); }, [customTax]);
-  useEffect(() => { updatePrefs({ streak }); }, [streak]);
-  useEffect(() => { updatePrefs({ allTags }); }, [allTags]);
-  useEffect(() => { if (lastExport) updatePrefs({ lastExport }); }, [lastExport]);
+  useEffect(() => { if (prefs) updatePrefs({ customTax }); }, [customTax]);
+  useEffect(() => { if (prefs) updatePrefs({ streak }); }, [streak]);
+  useEffect(() => { if (prefs) updatePrefs({ allTags }); }, [allTags]);
+  useEffect(() => { if (lastExport && prefs) updatePrefs({ lastExport }); }, [lastExport]);
   useEffect(() => { const fn = () => setDesktop(window.innerWidth >= 768); window.addEventListener("resize", fn); return () => window.removeEventListener("resize", fn); }, []);
 
-  // Save individual item to Firestore
   const persistItem = useCallback((item) => { fsSave(item); }, [fsSave]);
 
   const nav = useCallback((v, a1, a2, a3, a4) => {
@@ -1276,11 +1283,15 @@ function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, upda
     else if (v === "vault") { setView("vault"); setActiveDomain(a1 || null); }
     else if (v === "search") { setView("search"); setActiveDomain(null); }
     else if (v === "recent") { setView("recent"); setActiveDomain(null); }
+    else if (v === "visuals") { setView("visuals"); setActiveDomain(null); }
     else if (v === "settings") { setView("settings"); setActiveDomain(null); }
     else if (v === "detail") { setPrevView(view); setView("detail"); setItemId(a1); }
     else if (v === "add") { setPrevView(view); setView("add"); setEditItem(null); setAddInit({ domain: a1 || "", cat: a2 || "", subcat: a3 || "" }); }
     else if (v === "edit") { setView("edit"); setEditItem(a1); }
   }, [view]);
+
+  // Loading gate — after all hooks
+  if (!loaded || !prefs) return <div style={{ display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e0e",color:"#777",fontSize:14 }}>Loading data...</div>;
 
   const handleSave = (saved) => {
     setItems(prev => { const idx = prev.findIndex(i => i.id === saved.id); if (idx >= 0) { const n = [...prev]; n[idx] = saved; return n; } return [...prev, saved]; });
@@ -1391,7 +1402,6 @@ function TheArchiveInner({ initialItems, fsSave, fsSaveBatch, initialPrefs, upda
   const handleCreateTag = (tag) => { setAllTags(prev => prev.includes(tag) ? prev : [...prev, tag].sort()); };
   const handleRemoveTag = (tag) => { setAllTags(prev => prev.filter(t => t !== tag)); };
 
-  const [renameModal, setRenameModal] = useState(null);
   const handleRenameTax = (spec) => { setRenameModal(spec); };
   const handleConfirmRename = (newName) => {
     const { level: lv, oldName, domain: rDomain, category: rCat } = renameModal;
